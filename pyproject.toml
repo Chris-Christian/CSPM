@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cspm"
+version = "0.1.0"
+description = "A read-only AWS Cloud Security Posture Manager."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.35",
+    "click>=8.1",
+    "jinja2>=3.1",
+    "pydantic>=2.9",
+    "rich>=13.9",
+]
+
+[project.scripts]
+cspm = "cspm.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cspm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
