@@ -30,6 +30,25 @@ Show the CLI help:
 uv run cspm --help
 ```
 
+### LocalStack connectivity
+
+Phase 3 currently supports LocalStack only. Copy `.env.example` to `.env`, replace
+`LOCALSTACK_AUTH_TOKEN` with your LocalStack auth token, then start the service:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d
+uv run cspm connect
+```
+
+The Compose service binds to loopback on port 4566 and enables STS only. The
+`connect` command calls the read-only STS `GetCallerIdentity` API. The Python
+application reads `CSPM_TARGET`, `CSPM_REGION`, and
+`CSPM_LOCALSTACK_ENDPOINT_URL` from the process environment; it does not
+automatically read `.env`. Set those variables in PowerShell or another
+environment manager if you need values other than the defaults. Real AWS clients
+are disabled, and explicit LocalStack test credentials are used.
+
 ## Tests and lint
 
 ```powershell
@@ -39,4 +58,7 @@ uv run ruff check .
 
 ## Development status
 
-Project foundation only. **Scanning functionality has not yet been implemented.** The CLI currently provides help and version output; it does not connect to AWS, scan resources, evaluate rules, persist history, generate reports, or compare scans.
+The core model foundation and LocalStack connectivity check are implemented.
+**Resource scanning functionality has not yet been implemented.** There are no
+resource collectors, scan orchestration, rule evaluation, persistence, reports,
+or scan comparison yet. The application does not connect to real AWS accounts.

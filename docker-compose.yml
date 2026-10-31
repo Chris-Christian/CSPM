@@ -1,0 +1,20 @@
+services:
+  localstack:
+    image: localstack/localstack:2026.10.4
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      SERVICES: sts
+      DEFAULT_REGION: us-east-1
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:?Set LOCALSTACK_AUTH_TOKEN in .env}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import sys; from urllib.request import urlopen; response =
+          urlopen('http://127.0.0.1:4566/_localstack/health', timeout=2);
+          sys.exit(0 if 200 <= response.status < 300 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
