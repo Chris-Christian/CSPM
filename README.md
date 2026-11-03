@@ -1,6 +1,6 @@
 # CSPM
 
-A read-only AWS Cloud Security Posture Manager (CSPM) university project. The planned system will discover S3 buckets, IAM roles and policies, and EC2 security groups; evaluate configurations against modular rules; record scan history in SQLite; generate JSON, HTML, and Markdown reports; and compare scans for configuration drift. It will operate through a CLI and will not modify AWS resources.
+A read-only AWS Cloud Security Posture Manager (CSPM) university project. The current implementation discovers S3 buckets, IAM roles and policies, and EC2 security groups, then evaluates resources using modular rules. SQLite scan history, reports, and scan comparison remain future work. The project operates through a CLI and does not modify AWS resources during production scans.
 
 ## Technology stack
 
@@ -88,6 +88,76 @@ current discovery uses explicit per-resource AWS API calls and does not yet
 provide cross-service transactionality; AWS IAM policy versions and some S3
 configuration APIs can vary in emulation fidelity across LocalStack releases.
 
+## Rule assessment (Phase 5)
+
+`AssessmentEngine` evaluates in-memory `Resource` objects with explicitly
+registered `BaseRule` instances. It does not make AWS calls, persist results, or
+change scan lifecycle state. The default catalogue is constructed explicitly and
+ordered by stable rule ID. A rule returns a structured pass, finding, or
+incomplete-evidence result; only confirmed violations become `Finding` models.
+Evaluation errors remain visible in `AssessmentResult.errors` and are never
+converted into passing results or security findings.
+
+The built-in catalogue is:
+
+| Rule ID | Check | Severity | CIS mapping |
+| --- | --- | --- | --- |
+| S3-001 | Public bucket policy not blocked by `RestrictPublicBuckets` | HIGH | Unset |
+| S3-002 | Public ACL grant not ignored by `IgnorePublicAcls` | HIGH | Unset |
+| S3-003 | Incomplete bucket-level Block Public Access flags | MEDIUM | Unset |
+| IAM-001 | Wildcard actions or broad `Allow` exclusions in a policy document | HIGH | Unset |
+| IAM-002 | Unconditional wildcard principal allowed to assume a role | CRITICAL | Unset |
+| EC2-001 | IPv4 internet ingress overlaps configured sensitive ports | HIGH | Unset |
+| EC2-002 | IPv6 internet ingress overlaps configured sensitive ports | HIGH | Unset |
+
+The S3 policy rule uses the collected policy status as the public classification
+and accounts for `RestrictPublicBuckets`; `BlockPublicPolicy` alone does not
+neutralize an existing public policy. The ACL rule recognizes the S3
+`AllUsers` and `AuthenticatedUsers` groups and accounts for
+`IgnorePublicAcls`; `BlockPublicAcls` alone only prevents new public ACLs. The
+S3-003 finding reports incomplete bucket-level controls and explicitly does not
+claim that the bucket is currently public. Missing or malformed evidence is an
+evaluation error. Phase 4 collects bucket-level, not account-level, Block Public
+Access settings. S3 findings therefore describe public grants and bucket-level
+controls present in the collected data; they do not verify effective access
+against account-level controls.
+
+`AssessmentResult.is_complete` is false whenever any evaluation error exists.
+One evaluation can retain a confirmed finding and report separate malformed or
+unsupported evidence at the same time. An empty `findings` collection alone does
+not establish a clean assessment; check `is_complete` and `errors` as well.
+
+IAM-001 detects `Allow` statements with `Action: "*"`, service-wide action
+wildcards such as `s3:*`, `NotAction`, or `NotResource`.
+Wildcard resources are included as evidence when combined with wildcard
+actions; a wildcard resource by itself with a scoped action is not labeled
+overprivileged. `Deny` statements do not trigger findings. Conditional broad
+statements are reported as unevaluable because this project is not an IAM
+authorization simulator. The rule evaluates inline and managed policy
+documents collected in Phase 4. IAM-002 detects an unconditional wildcard
+principal allowed to call an STS assume-role action; conditional wildcard trust
+statements are unevaluable rather than assumed safe or unsafe.
+
+EC2 rules inspect ingress only. They match `0.0.0.0/0` and `::/0` separately,
+support TCP, UDP, and all-protocol rules, and test port-range overlap. Egress is
+not evaluated. The configurable TCP baseline is ports `22,23,445,1433,3306,3389,5432,6379,27017`.
+Override it with the comma-separated `CSPM_SENSITIVE_PORTS` environment value.
+UDP ports default to none and can be configured separately with
+`CSPM_SENSITIVE_UDP_PORTS`. Both settings accept ports 1–65535; duplicates are
+removed and values are sorted. This baseline is a configurable starting point,
+not an exhaustive dangerous-port list or a CIS requirement. An empty effective
+port configuration produces an evaluation error rather than a clean result.
+
+Each finding uses the existing finding model, UTC detection time, and
+`generate_fingerprint(rule_id, resource_type, resource_id)`. Fingerprints stay
+stable across scans while finding IDs and detection times are newly generated.
+CIS control and version mappings remain unset until a benchmark edition is
+selected and each mapping is verified against that edition.
+
+To add a rule, subclass `BaseRule`, provide a validated `Rule` as its
+`definition`, implement `evaluate(resource)`, then register an instance with
+`AssessmentEngine.register()`. The engine does not need to be modified.
+
 ## Tests and lint
 
 ```powershell
@@ -97,7 +167,7 @@ uv run ruff check .
 
 ## Development status
 
-The core models, LocalStack connectivity check, and Phase 4 read-only resource
-discovery are implemented. Rule evaluation, findings generation, persistence,
-reports, and scan comparison remain future work. The application does not
-connect to real AWS accounts.
+The core models, LocalStack connectivity, Phase 4 read-only resource discovery,
+and Phase 5 rule assessment are implemented. Persistence, generated reports,
+and scan comparison remain future work. The application does not connect to
+real AWS accounts.

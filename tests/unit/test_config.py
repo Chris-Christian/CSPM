@@ -1,6 +1,7 @@
 import pytest
+from pydantic import ValidationError
 
-from cspm.config import ConfigurationError, load_config
+from cspm.config import ConfigurationError, CSPMConfig, load_config
 from cspm.models.enums import TargetType
 
 
@@ -10,6 +11,34 @@ def test_config_defaults_to_localstack() -> None:
     assert config.target is TargetType.LOCALSTACK
     assert config.region == "us-east-1"
     assert str(config.localstack_endpoint_url).rstrip("/") == "http://localhost:4566"
+    assert config.sensitive_ports == (22, 23, 445, 1433, 3306, 3389, 5432, 6379, 27017)
+    assert config.sensitive_udp_ports == ()
+
+
+def test_config_parses_custom_sensitive_tcp_and_udp_ports() -> None:
+    config = load_config(
+        {
+            "CSPM_SENSITIVE_PORTS": "443,22,443",
+            "CSPM_SENSITIVE_UDP_PORTS": "161,53",
+        }
+    )
+
+    assert config.sensitive_ports == (22, 443)
+    assert config.sensitive_udp_ports == (53, 161)
+
+
+@pytest.mark.parametrize(
+    "ports",
+    ["ssh", "22,,80", "0", "65536", "-1"],
+)
+def test_config_rejects_invalid_sensitive_port_values(ports: str) -> None:
+    with pytest.raises(ConfigurationError, match="sensitive_ports"):
+        load_config({"CSPM_SENSITIVE_PORTS": ports})
+
+
+def test_config_rejects_boolean_ports_in_direct_configuration() -> None:
+    with pytest.raises(ValidationError):
+        CSPMConfig(sensitive_ports=(True,))
 
 
 def test_config_loads_explicit_cspm_environment() -> None:
@@ -95,6 +124,8 @@ def test_config_environment_is_isolated_between_loads(
         "CSPM_TARGET",
         "CSPM_REGION",
         "CSPM_LOCALSTACK_ENDPOINT_URL",
+        "CSPM_SENSITIVE_PORTS",
+        "CSPM_SENSITIVE_UDP_PORTS",
     ):
         monkeypatch.delenv(name, raising=False)
 
