@@ -41,13 +41,52 @@ docker compose up -d
 uv run cspm connect
 ```
 
-The Compose service binds to loopback on port 4566 and enables STS only. The
-`connect` command calls the read-only STS `GetCallerIdentity` API. The Python
+The Compose service binds to loopback on port 4566 and enables STS, S3, IAM,
+and EC2. The `connect` command calls the read-only STS `GetCallerIdentity` API.
+The Python
 application reads `CSPM_TARGET`, `CSPM_REGION`, and
 `CSPM_LOCALSTACK_ENDPOINT_URL` from the process environment; it does not
 automatically read `.env`. Set those variables in PowerShell or another
 environment manager if you need values other than the defaults. Real AWS clients
 are disabled, and explicit LocalStack test credentials are used.
+
+## Resource discovery (Phase 4)
+
+The S3 collector discovers bucket creation time, region, tags, ACL grants,
+bucket-level Block Public Access settings, bucket policies, and policy public
+status. The IAM collector discovers roles, trust policies, attached managed
+policies, inline role policies, customer-managed policies, policy documents,
+permissions boundaries, and tags. IAM resources use the documented `global`
+region value because IAM is a global service. The EC2 collector discovers
+security groups, ingress and egress permissions, IPv4/IPv6 ranges, referenced
+groups, VPC/owner information, and tags.
+
+Production collectors only call read/list/describe/get APIs. They preserve
+incomplete enrichment as collector errors and mark coverage partial; a failed
+primary inventory request is reported as failed. Discovery returns resources
+and per-collector results in memory. Scan lifecycle management, evaluation,
+findings, persistence, and reports are not part of this phase.
+
+After changing Compose services, recreate LocalStack from PowerShell:
+
+```powershell
+docker compose up -d --no-build --pull never
+```
+
+Run the unit suite and the real LocalStack discovery integration test:
+
+```powershell
+uv run pytest tests/unit -v
+uv run pytest -m integration -v
+```
+
+Integration tests require a healthy LocalStack instance with STS, S3, IAM, and
+EC2 enabled. They create uniquely named synthetic resources and clean up only
+those resources. They skip only if the loopback LocalStack endpoint cannot be
+reached; a reachable endpoint with a missing service fails the test. The
+current discovery uses explicit per-resource AWS API calls and does not yet
+provide cross-service transactionality; AWS IAM policy versions and some S3
+configuration APIs can vary in emulation fidelity across LocalStack releases.
 
 ## Tests and lint
 
@@ -58,7 +97,7 @@ uv run ruff check .
 
 ## Development status
 
-The core model foundation and LocalStack connectivity check are implemented.
-**Resource scanning functionality has not yet been implemented.** There are no
-resource collectors, scan orchestration, rule evaluation, persistence, reports,
-or scan comparison yet. The application does not connect to real AWS accounts.
+The core models, LocalStack connectivity check, and Phase 4 read-only resource
+discovery are implemented. Rule evaluation, findings generation, persistence,
+reports, and scan comparison remain future work. The application does not
+connect to real AWS accounts.
