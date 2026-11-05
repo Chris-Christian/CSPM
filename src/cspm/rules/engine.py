@@ -1,10 +1,13 @@
 """Deterministic, in-memory assessment using registered rules."""
 
+from __future__ import annotations
+
 import re
 from collections.abc import Iterable
 from copy import copy
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from cspm.config import CSPMConfig, load_config
@@ -13,6 +16,9 @@ from cspm.models.fingerprint import generate_fingerprint
 from cspm.models.resource import Resource
 from cspm.models.rule import Rule
 from cspm.rules.base import BaseRule, EvaluationStatus, RuleEvaluation
+
+if TYPE_CHECKING:
+    from cspm.persistence import ScanRepository
 
 
 @dataclass(frozen=True)
@@ -90,8 +96,7 @@ class AssessmentEngine:
     def rules(self) -> tuple[BaseRule, ...]:
         """Return detached rule copies ordered by stable identifier."""
         return tuple(
-            _copy_rule_with_definition(self._rules[key])
-            for key in sorted(self._rules)
+            _copy_rule_with_definition(self._rules[key]) for key in sorted(self._rules)
         )
 
     @property
@@ -101,6 +106,12 @@ class AssessmentEngine:
             self._rules[key].definition.model_copy(deep=True)
             for key in sorted(self._rules)
         )
+
+    def load_rules(self, repository: ScanRepository) -> tuple[Rule, ...]:
+        """Refresh stored rule definitions from this engine's registered catalogue."""
+        definitions = self.catalogue
+        repository.sync_rules(definitions)
+        return definitions
 
     def register(self, rule: BaseRule) -> None:
         """Register a rule instance, rejecting invalid or duplicate identifiers."""

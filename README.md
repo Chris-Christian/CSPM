@@ -158,6 +158,47 @@ To add a rule, subclass `BaseRule`, provide a validated `Rule` as its
 `definition`, implement `evaluate(resource)`, then register an instance with
 `AssessmentEngine.register()`. The engine does not need to be modified.
 
+## SQLite persistence (Phase 6)
+
+`ScanRepository` is the only application database layer and uses Python's
+standard-library `sqlite3`. It creates four tables: `scans`, `resources`,
+`findings`, and `rules`. Resources use the composite primary key
+`(scan_id, resource_id)`; findings reference scans, rules, and resources using
+that same composite resource identity. Foreign keys are enabled for every
+repository connection. Finding indexes support scan lookup and rule/resource
+lookup.
+
+The repository requires a path supplied by its caller; the project has no
+implicit database default or persistence environment setting. For local use,
+`ScanRepository(".local/cspm.sqlite3")` is a suitable choice. Call
+`initialize()` to create the database directory, schema, and indexes. SQLite
+database files and sidecars are excluded by `.gitignore`.
+
+Use the repository methods to create and update scans, save and retrieve
+resources and findings, and synchronize rule definitions. Rule synchronization
+upserts the engine's registered catalogue through `AssessmentEngine.load_rules`
+and preserves definitions that are absent from a later catalogue. Batch writes
+use transactions and duplicate scan, resource, or finding identifiers are
+reported instead of silently replacing historical data.
+
+`scans.assessment_errors_json` is SQL `NULL` until an assessment has run. A
+completed assessment with no errors stores `[]`; an assessment with errors stores
+its error records there. Confirmed findings are persisted in `findings` in the
+same transaction. Assessment errors do not change `ScanStatus`, which continues
+to represent scan lifecycle only. Passing rule evaluations are not persisted in
+this phase. Persistence is available through `ScanRepository`; the current CLI
+does not yet orchestrate or invoke persistence.
+
+Run persistence unit tests with:
+
+```powershell
+uv run --locked pytest tests/unit/test_persistence.py -v
+```
+
+The SQLite repository integration test uses a temporary database and does not
+require LocalStack; the existing discovery integration test continues to use
+the running LocalStack instance.
+
 ## Tests and lint
 
 ```powershell
@@ -168,6 +209,6 @@ uv run ruff check .
 ## Development status
 
 The core models, LocalStack connectivity, Phase 4 read-only resource discovery,
-and Phase 5 rule assessment are implemented. Persistence, generated reports,
-and scan comparison remain future work. The application does not connect to
-real AWS accounts.
+Phase 5 rule assessment, and Phase 6 SQLite persistence are implemented.
+Generated reports and scan comparison remain future work. The application does
+not connect to real AWS accounts.
