@@ -6,7 +6,7 @@ A read-only AWS Cloud Security Posture Manager (CSPM) university project. The cu
 
 - Python 3.13.2, managed with uv
 - Click and Rich for the CLI and terminal output
-- Boto3 for planned AWS integration
+- Boto3 for read-only LocalStack service calls
 - SQLite for scan history
 - Pydantic for data validation
 - Jinja2 for HTML reports
@@ -43,12 +43,57 @@ uv run cspm connect
 
 The Compose service binds to loopback on port 4566 and enables STS, S3, IAM,
 and EC2. The `connect` command calls the read-only STS `GetCallerIdentity` API.
-The Python
-application reads `CSPM_TARGET`, `CSPM_REGION`, and
+The Python application reads `CSPM_TARGET`, `CSPM_REGION`, and
 `CSPM_LOCALSTACK_ENDPOINT_URL` from the process environment; it does not
 automatically read `.env`. Set those variables in PowerShell or another
 environment manager if you need values other than the defaults. Real AWS clients
 are disabled, and explicit LocalStack test credentials are used.
+
+### Scan and report commands (Phase 9)
+
+Both commands require an explicit SQLite database path; the project intentionally
+has no implicit database path or persistence environment variable. Run a
+read-only discovery and assessment, then generate all formats for the persisted
+scan:
+
+```powershell
+uv run cspm scan --database .local/cspm.sqlite3
+uv run cspm report 123e4567-e89b-12d3-a456-426614174000 --database .local/cspm.sqlite3
+```
+
+`scan` verifies LocalStack connectivity before creating a `RUNNING` scan record.
+It then discovers resources, persists inventory, synchronizes the active rule
+catalogue, evaluates rules, and stores findings and assessment errors. The final
+scan status describes lifecycle; collector statuses and assessment errors
+describe coverage separately. An incomplete but persisted scan is clearly
+reported and returns exit code 2. An unrecoverable workflow failure returns a
+nonzero error and records `FAILED` when the repository remains available. A
+finding does not itself make the command fail. Production collectors remain
+read-only; resource creation in integration tests is limited to their own
+temporary LocalStack fixtures.
+
+`report` accepts `--format json`, `--format html`, `--format markdown`, or
+`--format all` (the default). Use `--output-dir PATH` to change the base
+directory; outputs remain in a per-scan subdirectory and existing report files
+are never overwritten. Report generation opens the scan database read-only and
+only reads persisted scan data. Reporting currently refuses WAL-mode databases
+and databases with SQLite `-wal`, `-shm`, or rollback-journal sidecars. SQLite
+may need to create or update sidecars while accessing a WAL database, even for
+read-only queries, so the report command fails closed for those states.
+
+The report-side header and sidecar checks happen before SQLite opens the file;
+they cannot atomically bind the inspected path to SQLite's later open. Keep the
+database quiescent while reporting. Another process replacing the database or
+changing its journal mode in that interval remains a narrow race; report access
+does not claim an atomic no-side-effect guarantee against concurrent external
+changes. For a WAL database, use SQLite's backup facility to create a consistent
+standalone database and report from that backup. Committed data may still reside
+in the WAL file. Never copy only the main database file or manually delete WAL,
+SHM, or rollback-journal files.
+
+Drift detection and the `compare` command are deferred. Scan/account identity is
+not persisted for historical comparisons, so missing findings are not treated
+as resolved by this CLI.
 
 ## Resource discovery (Phase 4)
 
@@ -63,9 +108,8 @@ groups, VPC/owner information, and tags.
 
 Production collectors only call read/list/describe/get APIs. They preserve
 incomplete enrichment as collector errors and mark coverage partial; a failed
-primary inventory request is reported as failed. Discovery returns resources
-and per-collector results in memory. Scan lifecycle management, evaluation,
-findings, persistence, and reports are not part of this phase.
+primary inventory request is reported as failed. The scan command persists
+these collector results alongside discovered resources and the assessment.
 
 After changing Compose services, recreate LocalStack from PowerShell:
 
@@ -185,9 +229,10 @@ reported instead of silently replacing historical data.
 completed assessment with no errors stores `[]`; an assessment with errors stores
 its error records there. Confirmed findings are persisted in `findings` in the
 same transaction. Assessment errors do not change `ScanStatus`, which continues
-to represent scan lifecycle only. Passing rule evaluations are not persisted in
-this phase. Persistence is available through `ScanRepository`; the current CLI
-does not yet orchestrate or invoke persistence.
+to represent scan lifecycle only. Passing rule evaluations are not persisted;
+the repository preserves the distinction between an unrun assessment (`NULL`)
+and one run without errors (`[]`). The CLI orchestrates persistence through
+`ScanRepository`.
 
 Run persistence unit tests with:
 
@@ -228,8 +273,9 @@ in the report. Failed or incomplete scans are identified explicitly; zero
 findings are not described as proof of security or compliance. CIS controls are
 shown only when present in the stored finding.
 
-At this phase there is no report CLI command or scan orchestration. Call the
-reporting API with the repository and UUID of an existing scan:
+Reports can be generated from the CLI with `cspm report`; the reporting API is
+also available for programmatic use with an existing database and the UUID of
+an existing scan:
 
 ```python
 from uuid import UUID
@@ -239,7 +285,6 @@ from cspm.reporting import generate_reports
 
 def export_scan(scan_id: UUID):
     repository = ScanRepository(".local/cspm.sqlite3")
-    repository.initialize()
     return generate_reports(repository, scan_id, formats="all")
 ```
 
@@ -257,6 +302,7 @@ uv run --locked pytest tests/unit/reporting -v
 ## Development status
 
 The core models, LocalStack connectivity, Phase 4 read-only resource discovery,
-Phase 5 rule assessment, Phase 6 SQLite persistence, and Phase 7 report
-generation are implemented. Scan comparison remains future work. The
-application does not connect to real AWS accounts.
+Phase 5 rule assessment, Phase 6 SQLite persistence, Phase 7 report generation,
+and Phase 9 CLI integration are implemented. Scan comparison and drift detection
+remain deferred; no `compare` command is available. The application does not
+connect to real AWS accounts.

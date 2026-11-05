@@ -2,6 +2,7 @@
 
 import sqlite3
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -22,11 +23,13 @@ from cspm.models import (
 )
 from cspm.persistence import (
     RepositoryDataError,
+    RepositoryError,
     RepositoryIntegrityError,
     RepositoryNotFoundError,
     RepositorySchemaError,
     RepositorySerializationError,
     ScanRepository,
+    _read_only_database_uri,
 )
 from cspm.rules import (
     AssessmentEngine,
@@ -133,6 +136,120 @@ def test_initialize_is_idempotent_and_creates_exactly_four_tables(repository) ->
         ("resource_id", 2),
     ]
     assert len({row[0] for row in finding_fks}) == 3
+
+
+def test_read_only_connection_rejects_writes_without_sidecars(repository) -> None:
+    before = repository.db_path.read_bytes()
+    sidecars = [
+        Path(f"{repository.db_path}{suffix}")
+        for suffix in ("-journal", "-wal", "-shm")
+    ]
+
+    with repository._connection(read_only=True) as connection:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute("CREATE TABLE should_not_be_created (id INTEGER)")
+
+    assert repository.db_path.read_bytes() == before
+    assert all(not path.exists() for path in sidecars)
+
+
+def test_read_only_uri_escapes_uri_metacharacters_and_relative_paths(
+    tmp_path, monkeypatch
+):
+    uri = _read_only_database_uri(Path("folder with #?% chars") / "history.sqlite3")
+
+    assert uri.startswith("file:")
+    assert "%23" in uri
+    assert "%3F" in uri
+    assert "%25" in uri
+    assert uri.endswith("?mode=ro")
+
+    relative_path = Path("folder with #percent%") / "cspm history.sqlite3"
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / relative_path
+    repository = ScanRepository(relative_path)
+    repository.initialize()
+    scan = make_scan(status=ScanStatus.COMPLETED)
+    repository.create_scan(scan)
+    before = target.read_bytes()
+
+    repository.validate_schema()
+    assert repository.get_scan(scan.scan_id) == scan
+    assert target.read_bytes() == before
+
+
+def test_read_only_connection_does_not_create_missing_database(tmp_path):
+    database_path = tmp_path / "absent.sqlite3"
+    repository = ScanRepository(database_path)
+
+    with pytest.raises(RepositoryError, match="connection failed"):
+        with repository._connection(read_only=True):
+            pass
+
+    assert not database_path.exists()
+
+
+def test_read_only_access_rejects_wal_mode_without_creating_sidecars(tmp_path):
+    database_path = tmp_path / "wal.sqlite3"
+    repository = ScanRepository(database_path)
+    repository.initialize()
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+
+    before = database_path.read_bytes()
+    sidecars = [
+        Path(f"{database_path}{suffix}")
+        for suffix in ("-journal", "-wal", "-shm")
+    ]
+
+    with pytest.raises(RepositoryError, match="WAL journal mode"):
+        repository.validate_schema()
+
+    assert database_path.read_bytes() == before
+    assert all(not path.exists() for path in sidecars)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "message"),
+    [
+        ("-wal", "WAL or shared-memory sidecar"),
+        ("-shm", "WAL or shared-memory sidecar"),
+        ("-journal", "rollback journal exists"),
+    ],
+)
+def test_read_only_access_reports_existing_sidecar_state(
+    tmp_path, suffix, message
+):
+    database_path = tmp_path / "sidecar.sqlite3"
+    repository = ScanRepository(database_path)
+    repository.initialize()
+    Path(f"{database_path}{suffix}").write_bytes(b"sidecar")
+
+    with pytest.raises(RepositoryError, match=message):
+        repository.validate_schema()
+
+
+def test_read_only_access_reports_unsupported_database_format(tmp_path):
+    database_path = tmp_path / "invalid.sqlite3"
+    database_path.write_bytes(b"not a SQLite database")
+
+    with pytest.raises(RepositoryError, match="unsupported SQLite database format"):
+        ScanRepository(database_path).validate_schema()
+
+
+def test_read_only_access_reports_database_inspection_failure(
+    tmp_path, monkeypatch
+):
+    database_path = tmp_path / "inaccessible.sqlite3"
+    ScanRepository(database_path).initialize()
+
+    def fail_open(_path, *_args, **_kwargs):
+        raise PermissionError("sensitive filesystem detail")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+    with pytest.raises(RepositoryError, match="could not be inspected") as error:
+        ScanRepository(database_path).validate_schema()
+    assert str(database_path) not in str(error.value)
 
 
 def test_initialize_rejects_scans_table_missing_assessment_errors_without_data_loss(

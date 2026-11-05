@@ -126,6 +126,66 @@ _ASSESSMENT_ERROR_KEYS = {
 }
 
 
+def _read_only_database_uri(path: Path) -> str:
+    """Build a SQLite read-only URI with path metacharacters safely escaped."""
+    return f"{path.absolute().as_uri()}?mode=ro"
+
+
+def _reject_read_only_sidecar_access(path: Path) -> None:
+    """Reject SQLite formats or sidecar states unsafe for read-only reporting."""
+    try:
+        with path.open("rb") as database_file:
+            header = database_file.read(100)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise RepositoryError(
+            "SQLite database state could not be inspected; check file access"
+        ) from None
+
+    if (
+        len(header) < 100
+        or header[:16] != b"SQLite format 3\x00"
+        or header[18:20] not in {b"\x01\x01", b"\x02\x02"}
+    ):
+        raise RepositoryError(
+            "unsupported SQLite database format or journal state for reporting"
+        )
+
+    for suffix in ("-wal", "-shm"):
+        try:
+            Path(f"{path}{suffix}").stat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise RepositoryError(
+                "SQLite WAL/SHM sidecar state could not be inspected; check file access"
+            ) from None
+        raise RepositoryError(
+            "an SQLite WAL or shared-memory sidecar exists; create a consistent "
+            "standalone database with SQLite's backup facility"
+        )
+
+    if header[18:20] == b"\x02\x02":
+        raise RepositoryError(
+            "WAL journal mode is unsupported for reporting; create a consistent "
+            "standalone database with SQLite's backup facility"
+        )
+
+    try:
+        Path(f"{path}-journal").stat()
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise RepositoryError(
+            "SQLite rollback-journal state could not be inspected; check file access"
+        ) from None
+    raise RepositoryError(
+        "an SQLite rollback journal exists; wait for database recovery or active "
+        "transactions to finish before reporting"
+    )
+
+
 class ScanRepository:
     """Own all SQLite access for CSPM scan and assessment data.
 
@@ -138,10 +198,15 @@ class ScanRepository:
         self.db_path = Path(db_path)
 
     @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
+    def _connection(self, *, read_only: bool = False) -> Iterator[sqlite3.Connection]:
         connection: sqlite3.Connection | None = None
         try:
-            connection = sqlite3.connect(self.db_path)
+            if read_only:
+                _reject_read_only_sidecar_access(self.db_path)
+                database_uri = _read_only_database_uri(self.db_path)
+                connection = sqlite3.connect(database_uri, uri=True)
+            else:
+                connection = sqlite3.connect(self.db_path)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys = ON")
             enabled = connection.execute("PRAGMA foreign_keys").fetchone()[0]
@@ -193,6 +258,16 @@ class ScanRepository:
             for statement in _SCHEMA:
                 connection.execute(statement)
             self._validate_schema(connection)
+
+    def validate_schema(self) -> None:
+        """Validate an existing database without creating or changing schema."""
+        try:
+            with self._connection(read_only=True) as connection:
+                self._validate_schema(connection)
+        except RepositorySchemaError:
+            raise
+        except sqlite3.Error:
+            raise RepositoryError("SQLite database schema validation failed") from None
 
     @staticmethod
     def _validate_schema(connection: sqlite3.Connection) -> None:
@@ -445,7 +520,7 @@ class ScanRepository:
     def get_scan(self, scan_id: UUID) -> Scan | None:
         """Return a validated scan, or ``None`` when its ID is not present."""
         try:
-            with self._connection() as connection:
+            with self._connection(read_only=True) as connection:
                 row = connection.execute(
                     "SELECT * FROM scans WHERE scan_id = ?", (str(scan_id),)
                 ).fetchone()
@@ -497,7 +572,7 @@ class ScanRepository:
     def get_resources(self, scan_id: UUID) -> list[Resource]:
         """Return all resources for a scan in stable identity order."""
         try:
-            with self._connection() as connection:
+            with self._connection(read_only=True) as connection:
                 rows = connection.execute(
                     """
                     SELECT * FROM resources WHERE scan_id = ?
@@ -532,7 +607,7 @@ class ScanRepository:
     def get_findings(self, scan_id: UUID) -> list[Finding]:
         """Return validated findings for a scan in stable order."""
         try:
-            with self._connection() as connection:
+            with self._connection(read_only=True) as connection:
                 rows = connection.execute(
                     """
                     SELECT * FROM findings WHERE scan_id = ?
@@ -571,7 +646,7 @@ class ScanRepository:
     def get_rule(self, rule_id: str) -> Rule | None:
         """Return one validated rule definition, if it exists."""
         try:
-            with self._connection() as connection:
+            with self._connection(read_only=True) as connection:
                 row = connection.execute(
                     "SELECT * FROM rules WHERE rule_id = ?", (rule_id,)
                 ).fetchone()
@@ -582,7 +657,7 @@ class ScanRepository:
     def get_rules(self) -> list[Rule]:
         """Return all stored definitions ordered by rule ID."""
         try:
-            with self._connection() as connection:
+            with self._connection(read_only=True) as connection:
                 rows = connection.execute(
                     "SELECT * FROM rules ORDER BY rule_id"
                 ).fetchall()
@@ -640,7 +715,7 @@ class ScanRepository:
     ) -> tuple[EvaluationRecord, ...] | None:
         """Return stored evaluation errors; ``None`` means not assessed yet."""
         try:
-            with self._connection() as connection:
+            with self._connection(read_only=True) as connection:
                 row = connection.execute(
                     """
                     SELECT assessment_errors_json FROM scans WHERE scan_id = ?
