@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSPM Scan {{ report.scan.scan_id }}</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #17212b; background: #f3f6f8; }
+    body { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+    header, section, .finding, .notice { background: #fff; border: 1px solid #d6dee5; border-radius: .5rem; padding: 1.25rem; margin: 1rem 0; }
+    header { border-top: .4rem solid #174a6e; }
+    h1, h2, h3, h4 { color: #173b54; }
+    .badge { display: inline-block; padding: .3rem .6rem; border-radius: .25rem; background: #e8eef3; font-weight: 700; }
+    .severity { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .75rem; }
+    .severity article { background: #f5f8fa; border: 1px solid #d6dee5; padding: .8rem; border-radius: .4rem; }
+    dl { display: grid; grid-template-columns: minmax(120px, 180px) 1fr; gap: .5rem; }
+    dt { font-weight: 700; } dd { margin: 0; overflow-wrap: anywhere; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f6f8; padding: 1rem; border-radius: .3rem; }
+    .notice { border-left: .4rem solid #9a5b00; }
+    .muted { color: #536574; }
+    @media print { body { background: white; padding: 0; } header, section, .finding, .notice { break-inside: avoid; box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CSPM Security Assessment Report</h1>
+    <p>Scan <code>{{ report.scan.scan_id }}</code></p>
+    <p>Target: <strong>{{ report.scan.target }}</strong> · Region: <strong>{{ report.scan.region }}</strong></p>
+    <span class="badge">READ-ONLY</span>
+  </header>
+
+  {% if report.scan.status != "completed" %}
+  <aside class="notice" role="status">
+    The scan lifecycle status is <strong>{{ report.scan.status }}</strong>.
+    This scan did not complete successfully; this report makes no compliance claim.
+  </aside>
+  {% endif %}
+
+  <section>
+    <h2>Scan summary</h2>
+    <dl>
+      <dt>Scan status</dt><dd>{{ report.scan.status }}</dd>
+      <dt>Started</dt><dd>{{ report.scan.started_at }}</dd>
+      <dt>Completed</dt><dd>{{ report.scan.completed_at or "Not recorded" }}</dd>
+      <dt>Resources discovered</dt><dd>{{ report.inventory.total_resources }}</dd>
+      <dt>Total findings</dt><dd>{{ report.assessment.total_findings }}</dd>
+    </dl>
+    {% if report.inventory.resource_counts_by_type %}
+    <h3>Resources by type</h3>
+    <ul>
+      {% for resource_type, count in report.inventory.resource_counts_by_type.items() %}
+      <li>{{ resource_type }}: {{ count }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Severity summary</h2>
+    <div class="severity">
+      {% for severity, count in report.assessment.severity_counts.items() %}
+      <article><strong>{{ severity }}</strong><br>{{ count }} finding(s)</article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <h2>Assessment coverage</h2>
+    {% if not report.assessment.has_run %}
+    <p class="notice">Assessment not run: no persisted assessment outcome is available.</p>
+    {% elif report.assessment.errors %}
+    <p class="notice">Incomplete assessment: {{ report.assessment.errors|length }} evaluation error(s) were recorded. Confirmed findings remain listed below.</p>
+    <ul>
+      {% for error in report.assessment.errors %}
+      <li><strong>{{ error.error_code or "EvaluationError" }}</strong>: {{ error.message or "No error message recorded" }} (resource {{ error.resource_id }}, rule {{ error.rule_id or "unspecified" }})</li>
+      {% endfor %}
+    </ul>
+    {% elif report.scan.status == "completed" %}
+    <p>Assessment ran without recorded evaluation errors. This is not a compliance certification.</p>
+    {% else %}
+    <p class="notice">No assessment errors were recorded, but the scan did not complete successfully.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Findings by severity</h2>
+    {% for severity, findings in finding_groups.items() %}
+    <section>
+      <h3>{{ severity }} ({{ findings|length }})</h3>
+      {% if not findings %}<p class="muted">No findings in this severity category.</p>{% endif %}
+      {% for finding in findings %}
+      <article class="finding">
+        <h4>{{ finding.title }}</h4>
+        <dl>
+          <dt>Finding ID</dt><dd><code>{{ finding.finding_id }}</code></dd>
+          <dt>Resource</dt><dd><code>{{ finding.resource_id }}</code> ({{ finding.resource_type }})</dd>
+          <dt>Rule</dt><dd><code>{{ finding.rule_id }}</code></dd>
+          <dt>Fingerprint</dt><dd><code>{{ finding.fingerprint }}</code></dd>
+          <dt>Detected</dt><dd>{{ finding.detected_at }}</dd>
+          {% if finding.cis_control %}<dt>CIS control</dt><dd>{{ finding.cis_control }}</dd>{% endif %}
+        </dl>
+        <h4>Evidence</h4><pre>{{ finding.evidence_json }}</pre>
+        <h4>Remediation</h4><p>{{ finding.remediation }}</p>
+        <details>
+          <summary>Collected resource metadata and tags</summary>
+          <h4>Metadata</h4><pre>{{ finding.resource_metadata_json }}</pre>
+          <h4>Tags</h4><pre>{{ finding.resource_tags_json }}</pre>
+        </details>
+      </article>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </section>
+
+  <footer class="muted">
+    <p>Report generated at {{ report.report_generated_at }}. Read-only assessment output.</p>
+  </footer>
+</body>
+</html>

@@ -1,15 +1,15 @@
 # CSPM
 
-A read-only AWS Cloud Security Posture Manager (CSPM) university project. The current implementation discovers S3 buckets, IAM roles and policies, and EC2 security groups, then evaluates resources using modular rules. SQLite scan history, reports, and scan comparison remain future work. The project operates through a CLI and does not modify AWS resources during production scans.
+A read-only AWS Cloud Security Posture Manager (CSPM) university project. The current implementation discovers S3 buckets, IAM roles and policies, and EC2 security groups, evaluates resources using modular rules, persists scan data in SQLite, and generates JSON, HTML, and Markdown reports. Scan comparison remains future work. The project operates through a CLI and does not modify AWS resources during production scans.
 
 ## Technology stack
 
 - Python 3.13.2, managed with uv
 - Click and Rich for the CLI and terminal output
 - Boto3 for planned AWS integration
-- SQLite for planned scan history
+- SQLite for scan history
 - Pydantic for data validation
-- Jinja2 for planned HTML reports
+- Jinja2 for HTML reports
 - pytest and Ruff for development
 
 ## Installation (Windows PowerShell)
@@ -206,9 +206,57 @@ uv run pytest
 uv run ruff check .
 ```
 
+## Reports (Phase 7)
+
+Reports are generated programmatically from a persisted scan through the
+`ScanRepository`; report rendering does not access SQLite directly. The
+supported formats are `json`, `html`, and `markdown`. The default `all` format
+produces all three. Output defaults to `./reports/<scan_id>/` with these
+filenames:
+
+- `findings.json` — scan and inventory summaries, assessment state and errors,
+  severity counts, and structured finding evidence.
+- `report.html` — a self-contained Jinja2 report with scan summaries, severity
+  groups, finding details, resource metadata, and assessment coverage.
+- `report.md` — a readable text report with scan and resource summaries,
+  severity groups, findings, evidence, remediation, and assessment errors.
+
+The report includes the UTC generation time and a read-only designation. An
+assessment that has not run is shown separately from one with no recorded
+evaluation errors. Assessment errors and confirmed findings are both preserved
+in the report. Failed or incomplete scans are identified explicitly; zero
+findings are not described as proof of security or compliance. CIS controls are
+shown only when present in the stored finding.
+
+At this phase there is no report CLI command or scan orchestration. Call the
+reporting API with the repository and UUID of an existing scan:
+
+```python
+from uuid import UUID
+
+from cspm.persistence import ScanRepository
+from cspm.reporting import generate_reports
+
+def export_scan(scan_id: UUID):
+    repository = ScanRepository(".local/cspm.sqlite3")
+    repository.initialize()
+    return generate_reports(repository, scan_id, formats="all")
+```
+
+Choose `formats="json"`, `formats="html"`, or `formats="markdown"` to write
+one format. A custom base directory can be supplied with `output_dir`. Existing
+report files are not overwritten; a failed multi-format write removes files
+published during that attempt where possible.
+
+Run report tests with:
+
+```powershell
+uv run --locked pytest tests/unit/reporting -v
+```
+
 ## Development status
 
 The core models, LocalStack connectivity, Phase 4 read-only resource discovery,
-Phase 5 rule assessment, and Phase 6 SQLite persistence are implemented.
-Generated reports and scan comparison remain future work. The application does
-not connect to real AWS accounts.
+Phase 5 rule assessment, Phase 6 SQLite persistence, and Phase 7 report
+generation are implemented. Scan comparison remains future work. The
+application does not connect to real AWS accounts.
