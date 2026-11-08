@@ -105,7 +105,8 @@ def _write_atomically(directory: Path, contents: dict[str, str]) -> dict[str, Pa
     temporary_files: list[tuple[Path, _FileIdentity | None]] = []
     published_files: list[tuple[Path, _FileIdentity]] = []
     try:
-        directory.mkdir(parents=True, exist_ok=True)
+        directory.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.mkdir(exist_ok=True, mode=0o700)
         if directory.is_symlink() or not directory.is_dir():
             raise OSError("scan report destination is not a regular directory")
 
@@ -161,9 +162,7 @@ def _write_atomically(directory: Path, contents: dict[str, str]) -> dict[str, Pa
             "and ensure report filenames do not already exist; existing files are "
             "never overwritten"
         )
-        raise ReportWriteError(
-            f"{message}{cleanup_note}"
-        ) from exc
+        raise ReportWriteError(f"{message}{cleanup_note}") from exc
 
     cleanup_errors = _cleanup_owned(temporary_files, "temporary report")
     if cleanup_errors:
