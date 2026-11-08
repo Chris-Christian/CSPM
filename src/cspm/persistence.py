@@ -1021,6 +1021,12 @@ def _resource_from_row(row: sqlite3.Row) -> Resource:
                 "tags": tags,
             }
         )
+    except RecursionError:  # <-- NEW (6 lines)
+        # Python 3.14's json.loads accepts nesting that Python 3.13 rejected, so
+        # the recursion limit is hit later, inside model validation.
+        raise RepositoryDataError(
+            "stored resource metadata JSON is malformed"
+        ) from None
     except (ValidationError, TypeError, ValueError):
         raise RepositoryDataError("stored resource record is invalid") from None
 
@@ -1045,6 +1051,8 @@ def _finding_from_row(row: sqlite3.Row) -> Finding:
                 "detected_at": _parse_timestamp(row["detected_at"], "finding"),
             }
         )
+    except RecursionError:
+        raise RepositoryDataError("stored finding evidence JSON is malformed") from None
     except (ValidationError, TypeError, ValueError):
         raise RepositoryDataError("stored finding record is invalid") from None
 
