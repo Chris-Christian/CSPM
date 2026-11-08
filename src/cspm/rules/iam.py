@@ -7,6 +7,7 @@ from cspm.models.enums import Severity
 from cspm.models.resource import Resource
 from cspm.models.rule import Rule
 from cspm.rules.base import BaseRule, RuleEvaluation
+from fnmatch import fnmatchcase
 
 
 class IamWildcardPermissionRule(BaseRule):
@@ -95,7 +96,8 @@ class IamWildcardPermissionRule(BaseRule):
             return RuleEvaluation.finding(
                 {
                     "policy_source": (
-                        "inline" if isinstance(metadata.get("owner_role_name"), str)
+                        "inline"
+                        if isinstance(metadata.get("owner_role_name"), str)
                         else "managed"
                     ),
                     "statements": broad_statements[:20],
@@ -161,10 +163,7 @@ class IamWildcardTrustRule(BaseRule):
                 continue
             if effect == "Deny" or not wildcard_keys:
                 continue
-            if not any(
-                action.lower().startswith("sts:assumerole") or action == "*"
-                for action in actions
-            ):
+            if not any(_action_grants_assume_role(action) for action in actions):
                 continue
             if "Condition" in statement:
                 errors.append("ConditionalTrustPolicyUnsupported")
@@ -218,6 +217,23 @@ def _has_action_wildcard(action: str) -> bool:
         return True
     service, separator, operation = normalized.partition(":")
     return bool(service and separator and operation == "*")
+
+
+_ASSUME_ROLE_ACTIONS = (
+    "sts:assumerole",
+    "sts:assumerolewithsaml",
+    "sts:assumerolewithwebidentity",
+)
+
+
+def _action_grants_assume_role(action: str) -> bool:
+    """True if an IAM action string can match any AssumeRole-family action.
+
+    IAM wildcards are only `*` and `?`; `[` is escaped so fnmatch does not
+    treat it as a character class.
+    """
+    pattern = action.lower().replace("[", "[[]")
+    return any(fnmatchcase(name, pattern) for name in _ASSUME_ROLE_ACTIONS)
 
 
 def _wildcard_principal_keys(principal: object) -> list[str] | None:
