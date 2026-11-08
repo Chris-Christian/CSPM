@@ -15,9 +15,7 @@ class UnsupportedTargetError(RuntimeError):
     """Raised when a client is requested for a disabled target."""
 
 
-def create_client(
-    service_name: str, config: CSPMConfig | None = None
-) -> BaseClient:
+def create_client(service_name: str, config: CSPMConfig | None = None) -> BaseClient:
     """Create an explicitly configured Boto3 client for LocalStack only."""
     settings = load_config() if config is None else config
     if settings.target is not TargetType.LOCALSTACK:
@@ -39,8 +37,6 @@ def create_client(
         endpoint_url=str(endpoint).rstrip("/"),
         region_name=settings.region,
         config=BotocoreConfig(
-            connect_timeout=2,
-            read_timeout=2,
-            retries={"max_attempts": 1},
+            connect_timeout=2, read_timeout=2, retries={"max_attempts": 1}, proxies={}
         ),
     )
