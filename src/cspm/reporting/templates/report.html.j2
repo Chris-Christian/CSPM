@@ -66,6 +66,20 @@
 
   <section>
     <h2>Assessment coverage</h2>
+    <h3>Collector coverage</h3>
+    {% if report.collectors.results %}
+    <ul>
+      {% for collector in report.collectors.results %}
+      <li><strong>{{ collector.collector_name }}</strong>: {{ collector.status }} ({{ collector.resources_discovered }} resource(s), {{ collector.errors|length }} error(s))</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="notice">No collector coverage was recorded for this scan.</p>
+    {% endif %}
+    {% if not report.collectors.complete %}
+    <p class="notice">Incomplete discovery: one or more collectors did not fully succeed, or none were recorded. Resources may be missing, so zero findings does not mean clean.</p>
+    {% endif %}
+    <h3>Rule evaluation</h3>
     {% if not report.assessment.has_run %}
     <p class="notice">Assessment not run: no persisted assessment outcome is available.</p>
     {% elif report.assessment.errors %}
@@ -75,6 +89,8 @@
       <li><strong>{{ error.error_code or "EvaluationError" }}</strong>: {{ error.message or "No error message recorded" }} (resource {{ error.resource_id }}, rule {{ error.rule_id or "unspecified" }})</li>
       {% endfor %}
     </ul>
+    {% elif report.scan.status == "completed" and not report.collectors.complete %}
+    <p class="notice">No rule evaluation errors were recorded, but discovery was incomplete (see collector coverage above); this report makes no compliance claim.</p>
     {% elif report.scan.status == "completed" %}
     <p>Assessment ran without recorded evaluation errors. This is not a compliance certification.</p>
     {% else %}
