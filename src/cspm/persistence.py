@@ -12,7 +12,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 from uuid import UUID
-
+import os
 from pydantic import ValidationError
 
 from cspm.models import (
@@ -250,7 +250,12 @@ class ScanRepository:
     def initialize(self) -> None:
         """Create the approved four-table schema and indexes idempotently."""
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                os.close(os.open(self.db_path, flags, 0o600))
+            except FileExistsError:
+                pass
         except OSError:
             raise RepositoryError("database directory could not be created") from None
         with self._transaction() as connection:
