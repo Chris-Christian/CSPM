@@ -25,6 +25,25 @@ def report_document(data: ReportData) -> dict[str, Any]:
             "total_resources": len(data.resources),
             "resource_counts_by_type": data.resource_counts_by_type,
         },
+        "collectors": {
+            "complete": data.collectors_complete,
+            "results": [
+                {
+                    "collector_name": result.collector_name,
+                    "status": result.status.value,
+                    "resources_discovered": result.resources_discovered,
+                    "errors": [
+                        {
+                            "operation": error.operation,
+                            "error_code": error.error_code,
+                            "message": error.message,
+                        }
+                        for error in result.errors
+                    ],
+                }
+                for result in data.scan.collector_results
+            ],
+        },
         "assessment": {
             "has_run": data.assessment_has_run,
             "completed_without_errors": data.assessment_completed_without_errors,
