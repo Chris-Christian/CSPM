@@ -1,7 +1,7 @@
 """Rules for IPv4 and IPv6 security-group ingress on sensitive ports."""
 
 from collections.abc import Mapping
-from ipaddress import ip_network
+from ipaddress import ip_network, collapse_addresses
 from typing import Any
 
 from cspm.models.enums import Severity
@@ -96,9 +96,7 @@ def _evaluate_ingress(
         if not isinstance(protocol, str) or not protocol:
             errors.append("InvalidIngressProtocol")
             continue
-        normalized_protocol = {"6": "tcp", "17": "udp"}.get(
-            protocol, protocol.lower()
-        )
+        normalized_protocol = {"6": "tcp", "17": "udp"}.get(protocol, protocol.lower())
         if normalized_protocol == "-1":
             applicable_ports = configured_ports
             start_port = end_port = None
@@ -118,6 +116,7 @@ def _evaluate_ingress(
             continue
         if not applicable_ports:
             continue
+        networks = []
         for ip_range in ranges:
             if not isinstance(ip_range, Mapping):
                 errors.append("InvalidIngressRange")
@@ -131,30 +130,33 @@ def _evaluate_ingress(
             except ValueError:
                 errors.append("InvalidIngressCidr")
                 continue
-            if network.version != address_family or network.prefixlen != 0:
+            if network.version == address_family:
+                networks.append(network)
+
+        # Collapse first so 0.0.0.0/1 + 128.0.0.0/1 is seen as 0.0.0.0/0.
+        sources = sorted({str(network) for network in networks})
+        for network in collapse_addresses(networks):
+            if network.prefixlen != 0:
                 continue
             if normalized_protocol == "-1":
                 matched_ports = sorted(configured_ports)
             else:
                 assert start_port is not None and end_port is not None
                 matched_ports = sorted(
-                    port
-                    for port in applicable_ports
-                    if start_port <= port <= end_port
+                    port for port in applicable_ports if start_port <= port <= end_port
                 )
             if matched_ports:
-                exposures.append(
-                    {
-                        "protocol": normalized_protocol,
-                        "cidr": str(network),
-                        "from_port": start_port,
-                        "to_port": end_port,
-                        "sensitive_ports": matched_ports[:20],
-                        "omitted_sensitive_port_count": max(
-                            0, len(matched_ports) - 20
-                        ),
-                    }
-                )
+                exposure: dict[str, Any] = {
+                    "protocol": normalized_protocol,
+                    "cidr": str(network),
+                    "from_port": start_port,
+                    "to_port": end_port,
+                    "sensitive_ports": matched_ports[:20],
+                    "omitted_sensitive_port_count": max(0, len(matched_ports) - 20),
+                }
+                if sources != [str(network)]:
+                    exposure["source_cidrs"] = sources[:20]
+                exposures.append(exposure)
 
     unique_errors = tuple(dict.fromkeys(errors))
     if exposures:
@@ -178,10 +180,6 @@ def _port_range(
 ) -> tuple[int | None, int | None]:
     """Read and validate an inclusive TCP/UDP port range."""
     start, end = permission.get("FromPort"), permission.get("ToPort")
-    if (
-        type(start) is not int
-        or type(end) is not int
-        or not 0 <= start <= end <= 65535
-    ):
+    if type(start) is not int or type(end) is not int or not 0 <= start <= end <= 65535:
         return None, None
     return start, end
