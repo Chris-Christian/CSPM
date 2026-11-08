@@ -35,11 +35,14 @@ class S3Collector(Collector):
             while True:
                 request = {} if token is None else {"ContinuationToken": token}
                 response = self.client.list_buckets(**request)
-                if not isinstance(response, Mapping) or not isinstance(
-                    response.get("Buckets", []), list
+                if (
+                    not isinstance(response, Mapping)
+                    or "Buckets" not in response
+                    or not isinstance(response["Buckets"], list)
                 ):
                     raise ValueError("ListBuckets returned an invalid response")
-                buckets.extend(response.get("Buckets", []))
+
+                buckets.extend(response["Buckets"])
                 if "ContinuationToken" not in response:
                     break
                 next_token = response["ContinuationToken"]
