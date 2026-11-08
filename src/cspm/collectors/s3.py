@@ -232,7 +232,10 @@ class S3Collector(Collector):
             response.get("Grants"), list
         ):
             raise ValueError("GetBucketAcl returned an invalid response")
-        return normalize_json(response)
+        acl: dict[str, Any] = {"Grants": normalize_json(response["Grants"])}
+        if "Owner" in response:
+            acl["Owner"] = normalize_json(response["Owner"])
+        return acl
 
     def _policy_status(self, bucket: str) -> dict[str, Any]:
         response = self.client.get_bucket_policy_status(Bucket=bucket)
