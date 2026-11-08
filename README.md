@@ -16,15 +16,15 @@ CSPM currently assesses Amazon S3, AWS IAM, and EC2 Security Groups through an e
 
 ## Security Rules
 
-| Rule ID | Description | Severity |
-|---|---|---|
-| S3-001 | Public bucket policy without bucket-level restriction | High |
-| S3-002 | Public ACL grants not ignored | High |
-| S3-003 | Incomplete S3 Block Public Access configuration | Medium |
-| IAM-001 | Broad IAM permissions and wildcard actions | High |
-| IAM-002 | Unconditional wildcard role trust | Critical |
-| EC2-001 | Sensitive IPv4 ingress exposed to the internet | High |
-| EC2-002 | Sensitive IPv6 ingress exposed to the internet | High |
+| Rule ID | Description                                           | Severity |
+| ------- | ----------------------------------------------------- | -------- |
+| S3-001  | Public bucket policy without bucket-level restriction | High     |
+| S3-002  | Public ACL grants not ignored                         | High     |
+| S3-003  | Incomplete S3 Block Public Access configuration       | Medium   |
+| IAM-001 | Broad IAM permissions and wildcard actions            | High     |
+| IAM-002 | Unconditional wildcard role trust                     | Critical |
+| EC2-001 | Sensitive IPv4 ingress exposed to the internet        | High     |
+| EC2-002 | Sensitive IPv6 ingress exposed to the internet        | High     |
 
 EC2 sensitive ports are configurable through environment variables. TCP defaults include SSH, Telnet, SMB, database, and other commonly sensitive ports.
 
@@ -64,10 +64,8 @@ uv sync --locked
 
 Configure the environment:
 
-**Windows PowerShell:**
-
-```powershell
-Copy-Item .env.example .env
+```shell
+cp .env.example .env
 ```
 
 Update `.env` with the required LocalStack authentication token. Keep this file private and never commit it.
@@ -129,13 +127,13 @@ Existing report files are not overwritten.
 
 ## Configuration
 
-| Variable | Description |
-|---|---|
-| `CSPM_TARGET` | Assessment target |
-| `CSPM_REGION` | AWS region |
-| `CSPM_LOCALSTACK_ENDPOINT_URL` | LocalStack endpoint |
-| `CSPM_SENSITIVE_PORTS` | Configurable TCP sensitive ports |
-| `CSPM_SENSITIVE_UDP_PORTS` | Configurable UDP sensitive ports |
+| Variable                       | Description                      |
+| ------------------------------ | -------------------------------- |
+| `CSPM_TARGET`                  | Assessment target                |
+| `CSPM_REGION`                  | AWS region                       |
+| `CSPM_LOCALSTACK_ENDPOINT_URL` | LocalStack endpoint              |
+| `CSPM_SENSITIVE_PORTS`         | Configurable TCP sensitive ports |
+| `CSPM_SENSITIVE_UDP_PORTS`     | Configurable UDP sensitive ports |
 
 See `.env.example` for the available configuration and default values.
 
