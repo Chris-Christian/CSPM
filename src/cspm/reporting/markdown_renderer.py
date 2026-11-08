@@ -143,6 +143,25 @@ def render_markdown_report(data: ReportData) -> str:
         f"| {severity.value} | {data.severity_counts[severity]} |"
         for severity in SEVERITY_ORDER
     )
+    lines.extend(["", "## Collector coverage", ""])
+    if data.scan.collector_results:
+        lines.extend(
+            f"- {_code(result.collector_name)}: {_inline(result.status.value)} "
+            f"({result.resources_discovered} resource(s), "
+            f"{len(result.errors)} error(s))"
+            for result in data.scan.collector_results
+        )
+    else:
+        lines.append("**No collector coverage was recorded for this scan.**")
+    if not data.collectors_complete:
+        lines.extend(
+            [
+                "",
+                "**Incomplete discovery:** one or more collectors did not fully "
+                "succeed, or none were recorded. Resources may be missing, so zero "
+                "findings does not mean clean.",
+            ]
+        )
     if data.assessment_errors is None:
         lines.extend(
             [
@@ -165,6 +184,15 @@ def render_markdown_report(data: ReportData) -> str:
                 "No assessment errors were recorded, but the scan lifecycle status "
                 f"is **{_inline(data.scan.status.value)}**. The scan did not complete "
                 "successfully; this report makes no compliance claim.",
+            ]
+        )
+    elif not data.collectors_complete:
+        lines.extend(
+            [
+                "",
+                "No rule evaluation errors were recorded, but discovery was "
+                "incomplete (see collector coverage); this report makes no "
+                "compliance claim.",
             ]
         )
     else:
