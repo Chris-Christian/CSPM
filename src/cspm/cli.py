@@ -5,6 +5,7 @@ from uuid import UUID
 
 import click
 from rich.console import Console
+from rich.console import escape
 
 from cspm.aws.client_factory import UnsupportedTargetError
 from cspm.aws.connectivity import ConnectivityError, verify_connectivity
@@ -32,7 +33,7 @@ def connect() -> None:
 
     Console().print(
         "[green]LocalStack connectivity successful[/green] "
-        f"(account: {result.account}, ARN: {result.arn})"
+        f"(account: {escape(result.account)}, ARN: {escape(result.arn)})"
     )
 
 
@@ -71,12 +72,11 @@ def scan(database_path: Path) -> None:
     console.print(f"Assessment errors: {len(result.assessment_errors)}")
     for collector in result.scan.collector_results:
         if collector.status.value != "success":
-            console.print(
-                f"Collector {collector.collector_name}: {collector.status.value}"
-            )
+            name = escape(collector.collector_name)
+            console.print(f"Collector {name}: {collector.status.value}")
             for error in collector.errors[:5]:
                 operation = error.operation or "collection"
-                console.print(f"  {operation}: {error.message}")
+                console.print(f"  {escape(operation)}: {escape(error.message)}")
             if len(collector.errors) > 5:
                 console.print(
                     f"  ... {len(collector.errors) - 5} more collector errors"
@@ -84,8 +84,9 @@ def scan(database_path: Path) -> None:
     for error in result.assessment_errors[:10]:
         rule = error.rule_id or "unmatched rule"
         console.print(
-            f"Assessment {rule} on {error.resource_type}:{error.resource_id}: "
-            f"{error.message or error.error_code or 'incomplete evaluation'}"
+            f"Assessment {escape(rule)} on {escape(error.resource_type)}:"
+            f"{escape(error.resource_id)}: "
+            f"{escape(error.message or error.error_code or 'incomplete evaluation')}"
         )
     if len(result.assessment_errors) > 10:
         console.print(
