@@ -1,13 +1,13 @@
 """Rules for objectively broad IAM policy permissions and trust policies."""
 
 from collections.abc import Mapping
+from fnmatch import fnmatchcase
 from typing import Any
 
 from cspm.models.enums import Severity
 from cspm.models.resource import Resource
 from cspm.models.rule import Rule
 from cspm.rules.base import BaseRule, RuleEvaluation
-from fnmatch import fnmatchcase
 
 
 class IamWildcardPermissionRule(BaseRule):

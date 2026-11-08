@@ -5,7 +5,7 @@ from uuid import UUID
 
 import click
 from rich.console import Console
-from rich.console import escape
+from rich.markup import escape
 
 from cspm.aws.client_factory import UnsupportedTargetError
 from cspm.aws.connectivity import ConnectivityError, verify_connectivity

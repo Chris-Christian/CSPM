@@ -1,7 +1,7 @@
 """Rules for IPv4 and IPv6 security-group ingress on sensitive ports."""
 
 from collections.abc import Mapping
-from ipaddress import ip_network, collapse_addresses
+from ipaddress import collapse_addresses, ip_network
 from typing import Any
 
 from cspm.models.enums import Severity

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -12,7 +13,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 from uuid import UUID
-import os
+
 from pydantic import ValidationError
 
 from cspm.models import (
