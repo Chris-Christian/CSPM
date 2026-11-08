@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from cspm.models import Finding, Resource, Scan
-from cspm.models.enums import Severity
+from cspm.models.enums import CollectorStatus, Severity
 from cspm.rules.engine import EvaluationRecord
 
 SEVERITY_ORDER = (
@@ -76,6 +76,14 @@ class ReportData:
     def assessment_completed_without_errors(self) -> bool:
         """Whether assessment ran and persisted no evaluation errors."""
         return self.assessment_errors == ()
+
+    @property
+    def collectors_complete(self) -> bool:
+        "True if Collector coverage was recorded and every collector succeeded."
+        results = self.scan.collector_results
+        return bool(results) and all(
+            result.status is CollectorStatus.SUCCESS for result in results
+        )
 
     @property
     def resource_counts_by_type(self) -> dict[str, int]:
