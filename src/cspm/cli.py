@@ -8,9 +8,13 @@ from rich.console import Console
 from rich.markup import escape
 
 from cspm.aws.client_factory import UnsupportedTargetError
-from cspm.aws.connectivity import ConnectivityError, verify_connectivity
+from cspm.aws.connectivity import (
+    ConnectivityError,
+    ConnectivityResult,
+    verify_connectivity,
+)
 from cspm.config import ConfigurationError, load_config
-from cspm.models.enums import Severity
+from cspm.models.enums import Severity, TargetType
 from cspm.persistence import RepositoryError, ScanRepository
 from cspm.reporting.exceptions import ReportError
 from cspm.reporting.writer import generate_reports
@@ -25,15 +29,18 @@ def main() -> None:
 
 @main.command()
 def connect() -> None:
-    """Verify connectivity to the configured LocalStack STS service."""
+    """Verify STS connectivity and display the configured target account."""
     try:
-        result = verify_connectivity(load_config())
+        config = load_config()
+        result = verify_connectivity(config)
     except (ConfigurationError, UnsupportedTargetError, ConnectivityError) as exc:
         raise click.ClickException(str(exc)) from None
 
+    target_name = "AWS" if config.target is TargetType.AWS else "LocalStack"
     Console().print(
-        "[green]LocalStack connectivity successful[/green] "
-        f"(account: {escape(result.account)}, ARN: {escape(result.arn)})"
+        f"[green]{target_name} connectivity successful[/green] "
+        f"(account: {escape(result.account)}, region: {escape(config.region)}, "
+        f"ARN: {escape(result.arn)})"
     )
 
 
@@ -46,12 +53,22 @@ def connect() -> None:
     help="SQLite database path for scan history.",
 )
 def scan(database_path: Path) -> None:
-    """Discover LocalStack resources, assess them, and persist the scan."""
+    """Discover resources from the selected target and persist the scan."""
     console = Console()
     try:
         config = load_config()
-        console.print("Checking LocalStack and running read-only assessment...")
-        result = run_scan(ScanRepository(database_path), config)
+        console.print("Verifying target account before the read-only scan...")
+
+        def show_verified_account(identity: ConnectivityResult) -> None:
+            target_name = "AWS" if config.target is TargetType.AWS else "LocalStack"
+            console.print(
+                f"Verified {target_name} account {escape(identity.account)} "
+                f"in region {escape(config.region)}; starting scan."
+            )
+
+        result = run_scan(
+            ScanRepository(database_path), config, on_connected=show_verified_account
+        )
     except (
         ConfigurationError,
         UnsupportedTargetError,

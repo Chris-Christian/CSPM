@@ -1,13 +1,17 @@
 """Read-only discovery of S3 buckets and their security configuration."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 from uuid import UUID
 
+from botocore.client import BaseClient
+
+from cspm.aws.client_factory import create_client
 from cspm.collectors.base import Collector, CollectorCollection, result_for, safe_error
 from cspm.collectors.normalization import normalize_json, normalize_tags
 from cspm.models.collector import CollectorError
+from cspm.models.enums import TargetType
 from cspm.models.resource import Resource
 
 _ABSENT_CONFIGURATION_CODES = {
@@ -33,7 +37,13 @@ class S3Collector(Collector):
         try:
             buckets: list[dict[str, Any]] = []
             while True:
-                request = {} if token is None else {"ContinuationToken": token}
+                request = (
+                    {"MaxBuckets": 1000}
+                    if self.config.target is TargetType.AWS
+                    else {}
+                )
+                if token is not None:
+                    request["ContinuationToken"] = token
                 response = self.client.list_buckets(**request)
                 if (
                     not isinstance(response, Mapping)
@@ -61,6 +71,7 @@ class S3Collector(Collector):
             primary_failed = True
 
         config = self.config
+        regional_clients: dict[str, BaseClient] = {}
         for bucket in buckets:
             name = bucket.get("Name") if isinstance(bucket, Mapping) else None
             if not isinstance(name, str) or not name:
@@ -103,32 +114,76 @@ class S3Collector(Collector):
                 errors.append(safe_error("GetBucketLocation", exc))
                 metadata["bucket_location"] = {"status": "error"}
 
-            self._enrich(name, "GetBucketTagging", "tags", metadata, errors, self._tags)
-            self._enrich(
-                name,
-                "GetPublicAccessBlock",
-                "public_access_block",
-                metadata,
-                errors,
-                self._public_access_block,
-            )
-            self._enrich(
-                name,
-                "GetBucketPolicy",
-                "policy",
-                metadata,
-                errors,
-                self._policy,
-            )
-            self._enrich(name, "GetBucketAcl", "acl", metadata, errors, self._acl)
-            self._enrich(
-                name,
-                "GetBucketPolicyStatus",
-                "policy_status",
-                metadata,
-                errors,
-                self._policy_status,
-            )
+            bucket_client: BaseClient | None = self.client
+            if config.target is TargetType.AWS:
+                try:
+                    if bucket_region != config.region:
+                        if bucket_region not in regional_clients:
+                            regional_clients[bucket_region] = create_client(
+                                "s3", config, region_name=bucket_region
+                            )
+                        bucket_client = regional_clients[bucket_region]
+                    else:
+                        bucket_client = self.client
+                except Exception as exc:
+                    errors.append(safe_error("CreateRegionalS3Client", exc))
+                    bucket_client = None
+
+            if bucket_client is None:
+                for key in (
+                    "tags",
+                    "public_access_block",
+                    "policy",
+                    "acl",
+                    "policy_status",
+                ):
+                    metadata[key] = {"status": "error"}
+            else:
+                self._enrich(
+                    name,
+                    "GetBucketTagging",
+                    "tags",
+                    metadata,
+                    errors,
+                    bucket_client,
+                    self._tags,
+                )
+                self._enrich(
+                    name,
+                    "GetPublicAccessBlock",
+                    "public_access_block",
+                    metadata,
+                    errors,
+                    bucket_client,
+                    self._public_access_block,
+                )
+                self._enrich(
+                    name,
+                    "GetBucketPolicy",
+                    "policy",
+                    metadata,
+                    errors,
+                    bucket_client,
+                    self._policy,
+                )
+                self._enrich(
+                    name,
+                    "GetBucketAcl",
+                    "acl",
+                    metadata,
+                    errors,
+                    bucket_client,
+                    self._acl,
+                )
+                self._enrich(
+                    name,
+                    "GetBucketPolicyStatus",
+                    "policy_status",
+                    metadata,
+                    errors,
+                    bucket_client,
+                    self._policy_status,
+                )
             try:
                 resources.append(
                     Resource(
@@ -159,10 +214,11 @@ class S3Collector(Collector):
         key: str,
         metadata: dict[str, Any],
         errors: list[CollectorError],
-        getter: Any,
+        client: BaseClient,
+        getter: Callable[[str, BaseClient], Any],
     ) -> None:
         try:
-            value = getter(bucket)
+            value = getter(bucket, client)
             metadata[key] = value
             if isinstance(value, Mapping) and value.get("status") == "invalid":
                 errors.append(safe_error(operation, ValueError("invalid response")))
@@ -174,8 +230,9 @@ class S3Collector(Collector):
                 errors.append(safe_error(operation, exc))
                 metadata[key] = {"status": "error"}
 
-    def _tags(self, bucket: str) -> dict[str, Any]:
-        response = self.client.get_bucket_tagging(Bucket=bucket)
+    def _tags(self, bucket: str, client: BaseClient | None = None) -> dict[str, Any]:
+        client = self.client if client is None else client
+        response = client.get_bucket_tagging(Bucket=bucket)
         if not isinstance(response, Mapping) or not isinstance(
             response.get("TagSet"), list
         ):
@@ -185,8 +242,11 @@ class S3Collector(Collector):
             "values": normalize_tags(response["TagSet"]),
         }
 
-    def _public_access_block(self, bucket: str) -> dict[str, Any]:
-        response = self.client.get_public_access_block(Bucket=bucket)
+    def _public_access_block(
+        self, bucket: str, client: BaseClient | None = None
+    ) -> dict[str, Any]:
+        client = self.client if client is None else client
+        response = client.get_public_access_block(Bucket=bucket)
         configuration = response.get("PublicAccessBlockConfiguration")
         required_flags = {
             "BlockPublicAcls",
@@ -205,8 +265,9 @@ class S3Collector(Collector):
             "configuration": normalize_json(configuration),
         }
 
-    def _policy(self, bucket: str) -> dict[str, Any]:
-        response = self.client.get_bucket_policy(Bucket=bucket)
+    def _policy(self, bucket: str, client: BaseClient | None = None) -> dict[str, Any]:
+        client = self.client if client is None else client
+        response = client.get_bucket_policy(Bucket=bucket)
         if not isinstance(response, Mapping) or not isinstance(
             response.get("Policy"), str
         ):
@@ -229,8 +290,9 @@ class S3Collector(Collector):
             }
         return {"status": "present", "document": normalize_json(document)}
 
-    def _acl(self, bucket: str) -> dict[str, Any]:
-        response = self.client.get_bucket_acl(Bucket=bucket)
+    def _acl(self, bucket: str, client: BaseClient | None = None) -> dict[str, Any]:
+        client = self.client if client is None else client
+        response = client.get_bucket_acl(Bucket=bucket)
         if not isinstance(response, Mapping) or not isinstance(
             response.get("Grants"), list
         ):
@@ -240,8 +302,11 @@ class S3Collector(Collector):
             acl["Owner"] = normalize_json(response["Owner"])
         return acl
 
-    def _policy_status(self, bucket: str) -> dict[str, Any]:
-        response = self.client.get_bucket_policy_status(Bucket=bucket)
+    def _policy_status(
+        self, bucket: str, client: BaseClient | None = None
+    ) -> dict[str, Any]:
+        client = self.client if client is None else client
+        response = client.get_bucket_policy_status(Bucket=bucket)
         policy_status = response.get("PolicyStatus")
         is_public = (
             policy_status.get("IsPublic")

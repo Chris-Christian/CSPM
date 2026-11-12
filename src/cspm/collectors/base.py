@@ -9,7 +9,12 @@ from uuid import UUID
 from botocore.client import BaseClient
 from botocore.exceptions import BotoCoreError, ClientError
 
-from cspm.aws.client_factory import UnsupportedTargetError, create_client
+from cspm.aws.client_factory import (
+    UnsupportedTargetError,
+    _validate_aws_client_endpoint,
+    _validate_aws_endpoint_configuration,
+    create_client,
+)
 from cspm.config import (
     CSPMConfig,
     _validate_localstack_endpoint,
@@ -83,13 +88,21 @@ class Collector(ABC):
         self, config: CSPMConfig | None = None, client: BaseClient | None = None
     ) -> None:
         self.config: CSPMConfig = config if config is not None else load_config()
-        if self.config.target is not TargetType.LOCALSTACK:
-            raise UnsupportedTargetError("Resource collectors support LocalStack only.")
-        _validate_localstack_endpoint(self.config.localstack_endpoint_url)
+        if self.config.target is TargetType.LOCALSTACK:
+            _validate_localstack_endpoint(self.config.localstack_endpoint_url)
+        elif self.config.target is TargetType.AWS:
+            _validate_aws_endpoint_configuration(self.config)
+        else:
+            raise UnsupportedTargetError(
+                "Resource collectors require a supported target."
+            )
         client_meta = getattr(client, "meta", None)
         client_endpoint = getattr(client_meta, "endpoint_url", None)
         if client_endpoint is not None:
-            _validate_localstack_endpoint(client_endpoint)
+            if self.config.target is TargetType.LOCALSTACK:
+                _validate_localstack_endpoint(client_endpoint)
+            else:
+                _validate_aws_client_endpoint(client_endpoint)
         self._client = client
 
     @property

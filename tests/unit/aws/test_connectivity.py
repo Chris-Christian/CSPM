@@ -15,6 +15,7 @@ from cspm.aws.connectivity import (
     verify_connectivity,
 )
 from cspm.config import load_config
+from cspm.models.enums import TargetType
 
 
 def test_connectivity_calls_sts_and_returns_identity(
@@ -37,6 +38,26 @@ def test_connectivity_calls_sts_and_returns_identity(
     assert result.account == "000000000000"
     assert result.arn == "arn:aws:iam::000000000000:root"
     assert result.user_id == "AKIAIOSFODNN7EXAMPLE"
+
+
+def test_aws_connectivity_returns_identity_using_aws_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = Mock()
+    client.get_caller_identity.return_value = {
+        "Account": "123456789012",
+        "Arn": "arn:aws:iam::123456789012:root",
+        "UserId": "AIDATESTUSER",
+    }
+    create_client = Mock(return_value=client)
+    monkeypatch.setattr(connectivity, "create_client", create_client)
+    config = load_config({"CSPM_TARGET": "aws", "CSPM_REGION": "us-west-2"})
+
+    result = verify_connectivity(config)
+
+    create_client.assert_called_once_with("sts", config)
+    assert result.account == "123456789012"
+    assert config.target is TargetType.AWS
 
 
 @pytest.mark.parametrize(

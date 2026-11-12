@@ -162,6 +162,31 @@ def test_run_scan_success_records_completed_coverage(tmp_path, monkeypatch):
     assert repository.get_assessment_errors(result.scan.scan_id) == ()
 
 
+def test_verified_account_callback_runs_before_scan_repository_initialization(
+    tmp_path, monkeypatch
+):
+    _install_fakes(monkeypatch)
+    identity = object()
+    events = []
+    monkeypatch.setattr(service, "verify_connectivity", lambda _config: identity)
+    repository = ScanRepository(tmp_path / "callback-order.sqlite3")
+    initialize = repository.initialize
+
+    def track_initialize():
+        events.append("initialize")
+        initialize()
+
+    monkeypatch.setattr(repository, "initialize", track_initialize)
+
+    service.run_scan(
+        repository,
+        CSPMConfig(target=TargetType.AWS),
+        on_connected=lambda received: events.append(("connected", received)),
+    )
+
+    assert events == [("connected", identity), "initialize"]
+
+
 def test_run_scan_marks_failed_when_resource_persistence_fails(tmp_path, monkeypatch):
     _install_fakes(monkeypatch)
     repository = ScanRepository(tmp_path / "cspm.sqlite3")

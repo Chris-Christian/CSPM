@@ -22,7 +22,9 @@ class FakeIAM:
 
     def list_roles(self, **kwargs):
         if kwargs.get("Marker") == "page-2":
-            return self.call("list_roles", {"Roles": []}, **kwargs)
+            return self.call(
+                "list_roles", {"Roles": [], "IsTruncated": False}, **kwargs
+            )
         response = getattr(self, "roles", {"Roles": []})
         if getattr(self, "role_pagination", False):
             response = {
@@ -37,24 +39,36 @@ class FakeIAM:
                 "IsTruncated": True,
                 "Marker": "page-2",
             }
+        elif not getattr(self, "malformed_role_pagination", False):
+            response = {**response, "IsTruncated": False}
         return self.call("list_roles", response, **kwargs)
 
     def list_policies(self, **kwargs):
+        response = getattr(self, "policies", {"Policies": []})
+        response = {**response, "IsTruncated": False}
         return self.call(
-            "list_policies", getattr(self, "policies", {"Policies": []}), **kwargs
+            "list_policies", response, **kwargs
         )
 
     def list_attached_role_policies(self, **kwargs):
+        response = {
+            "AttachedPolicies": getattr(self, "attached_policies", []),
+            "IsTruncated": False,
+        }
         return self.call(
             "list_attached_role_policies",
-            {"AttachedPolicies": getattr(self, "attached_policies", [])},
+            response,
             **kwargs,
         )
 
     def list_role_policies(self, **kwargs):
+        response = {
+            "PolicyNames": getattr(self, "inline_names", []),
+            "IsTruncated": False,
+        }
         return self.call(
             "list_role_policies",
-            {"PolicyNames": getattr(self, "inline_names", [])},
+            response,
             **kwargs,
         )
 
@@ -65,6 +79,8 @@ class FakeIAM:
             response = pages.get(marker, {"Tags": []})
         else:
             response = {"Tags": getattr(self, "role_tags", [])}
+        if not getattr(self, "malformed_role_tag_pagination", False):
+            response = {"IsTruncated": False, **response}
         return self.call("list_role_tags", response, **kwargs)
 
     def get_role_policy(self, **kwargs):
@@ -300,6 +316,68 @@ def test_iam_role_tag_pagination_errors_do_not_report_success(pages) -> None:
         ]
     }
     client.role_tag_pages = pages
+
+    outcome = IAMCollector(client=client).collect(uuid4())
+
+    role = next(
+        resource
+        for resource in outcome.resources
+        if resource.resource_type == "iam_role"
+    )
+    assert role.tags == {}
+    assert role.raw_metadata["tags_status"] == "failed"
+    assert outcome.result.status is CollectorStatus.PARTIAL
+    assert any(error.operation == "ListRoleTags" for error in outcome.result.errors)
+
+
+@pytest.mark.parametrize(
+    "pagination_value",
+    [None, "false", 0],
+    ids=["missing", "string", "integer"],
+)
+def test_iam_role_inventory_fails_closed_on_malformed_is_truncated(
+    pagination_value,
+) -> None:
+    client = FakeIAM()
+    client.roles = {
+        "Roles": [
+            {
+                "RoleName": "demo",
+                "Arn": "arn:aws:iam::000000000000:role/demo",
+                "AssumeRolePolicyDocument": {"Statement": []},
+            }
+        ]
+    }
+    client.malformed_role_pagination = True
+    if pagination_value is not None:
+        client.roles["IsTruncated"] = pagination_value
+
+    outcome = IAMCollector(client=client).collect(uuid4())
+
+    assert any(resource.resource_type == "iam_role" for resource in outcome.resources)
+    assert outcome.result.status is CollectorStatus.FAILED
+    assert any(error.operation == "ListRoles" for error in outcome.result.errors)
+
+
+@pytest.mark.parametrize("pagination_value", [None, "false", 0])
+def test_iam_role_tag_enrichment_fails_closed_on_malformed_is_truncated(
+    pagination_value,
+) -> None:
+    client = FakeIAM()
+    client.roles = {
+        "Roles": [
+            {
+                "RoleName": "demo",
+                "Arn": "arn:aws:iam::000000000000:role/demo",
+                "AssumeRolePolicyDocument": {"Statement": []},
+            }
+        ]
+    }
+    client.malformed_role_tag_pagination = True
+    response = {"Tags": []}
+    if pagination_value is not None:
+        response["IsTruncated"] = pagination_value
+    client.role_tag_pages = {None: response}
 
     outcome = IAMCollector(client=client).collect(uuid4())
 

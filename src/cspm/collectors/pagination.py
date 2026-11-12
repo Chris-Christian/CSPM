@@ -40,7 +40,14 @@ def collect_pages(
                 ValueError(f"{result_key} returned an invalid paginated response"),
             )
         items.extend(response[result_key])
-        truncated = response.get("IsTruncated", False)
+        if token_parameter == "Marker":
+            truncated = response.get("IsTruncated")
+            if not isinstance(truncated, bool):
+                raise PaginationError(
+                    result_key,
+                    items,
+                    ValueError(f"{result_key} returned an invalid IsTruncated value"),
+                )
         next_marker = (
             response.get("NextToken")
             if token_parameter == "NextToken"

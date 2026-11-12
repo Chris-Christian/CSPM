@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from cspm.aws.connectivity import ConnectivityError, ConnectivityResult
 from cspm.cli import main
-from cspm.config import ConfigurationError
+from cspm.config import ConfigurationError, CSPMConfig
 from cspm.models import (
     CollectorError,
     CollectorResult,
@@ -88,6 +88,33 @@ def test_connect_command_reports_success(mock_verify: object) -> None:
     assert "000000000000" in result.output
 
 
+def test_connect_command_displays_verified_aws_account(monkeypatch) -> None:
+    import cspm.cli as cli
+
+    monkeypatch.setattr(
+        cli,
+        "load_config",
+        lambda: CSPMConfig(target=TargetType.AWS, region="eu-west-1"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "verify_connectivity",
+        lambda _config: ConnectivityResult(
+            connected=True,
+            account="123456789012",
+            arn="arn:aws:iam::123456789012:root",
+            user_id="AIDATESTUSER",
+        ),
+    )
+
+    result = CliRunner().invoke(main, ["connect"])
+
+    assert result.exit_code == 0
+    assert "AWS connectivity successful" in result.output
+    assert "123456789012" in result.output
+    assert "eu-west-1" in result.output
+
+
 @patch("cspm.cli.verify_connectivity", side_effect=ConnectivityError("offline"))
 def test_connect_command_reports_failure(mock_verify: object) -> None:
     result = CliRunner().invoke(main, ["connect"])
@@ -98,7 +125,7 @@ def test_connect_command_reports_failure(mock_verify: object) -> None:
 
 def test_scan_command_persists_and_summarizes_scan(tmp_path, monkeypatch) -> None:
     expected = _scan_result()
-    monkeypatch.setattr("cspm.cli.run_scan", lambda *_args: expected)
+    monkeypatch.setattr("cspm.cli.run_scan", lambda *_args, **_kwargs: expected)
 
     result = CliRunner().invoke(
         main, ["scan", "--database", str(tmp_path / "history.sqlite3")]
@@ -110,11 +137,41 @@ def test_scan_command_persists_and_summarizes_scan(tmp_path, monkeypatch) -> Non
     assert "Assessment coverage: complete" in result.output
 
 
+def test_scan_displays_verified_aws_account_before_scan_summary(
+    tmp_path, monkeypatch
+) -> None:
+    import cspm.cli as cli
+
+    expected = _scan_result()
+    identity = ConnectivityResult(
+        connected=True,
+        account="123456789012",
+        arn="arn:aws:iam::123456789012:root",
+        user_id="AIDATESTUSER",
+    )
+    monkeypatch.setattr(
+        cli, "load_config", lambda: CSPMConfig(target=TargetType.AWS)
+    )
+
+    def run_with_identity(_repository, _config, *, on_connected):
+        on_connected(identity)
+        return expected
+
+    monkeypatch.setattr(cli, "run_scan", run_with_identity)
+    result = CliRunner().invoke(
+        main, ["scan", "--database", str(tmp_path / "aws-history.sqlite3")]
+    )
+
+    assert result.exit_code == 0
+    assert "Verified AWS account 123456789012" in result.output
+    assert result.output.index("Verified AWS account") < result.output.index("Scan ID:")
+
+
 def test_scan_command_returns_distinct_exit_code_for_incomplete_results(
     tmp_path, monkeypatch
 ) -> None:
     expected = _scan_result(complete=False)
-    monkeypatch.setattr("cspm.cli.run_scan", lambda *_args: expected)
+    monkeypatch.setattr("cspm.cli.run_scan", lambda *_args, **_kwargs: expected)
 
     result = CliRunner().invoke(
         main, ["scan", "--database", str(tmp_path / "history.sqlite3")]
@@ -133,7 +190,9 @@ def test_scan_command_reports_invalid_configuration_without_running(
         raise ConfigurationError("invalid config")
 
     monkeypatch.setattr("cspm.cli.load_config", fail_config)
-    monkeypatch.setattr("cspm.cli.run_scan", lambda *_args: pytest.fail("must not run"))
+    monkeypatch.setattr(
+        "cspm.cli.run_scan", lambda *_args, **_kwargs: pytest.fail("must not run")
+    )
     result = CliRunner().invoke(
         main, ["scan", "--database", str(tmp_path / "history.sqlite3")]
     )
@@ -143,7 +202,7 @@ def test_scan_command_reports_invalid_configuration_without_running(
 
 
 def test_scan_command_reports_connection_failure(tmp_path, monkeypatch) -> None:
-    def fail_scan(*_args):
+    def fail_scan(*_args, **_kwargs):
         raise ConnectivityError("LocalStack is unavailable")
 
     monkeypatch.setattr("cspm.cli.run_scan", fail_scan)

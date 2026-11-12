@@ -3,7 +3,6 @@ from uuid import UUID
 
 import pytest
 
-from cspm.aws.client_factory import UnsupportedTargetError
 from cspm.collectors.base import Collector, CollectorCollection
 from cspm.config import ConfigurationError, load_config
 
@@ -33,11 +32,21 @@ def test_collector_rejects_injected_boto_clients_with_non_loopback_endpoints(
         ConcreteCollector(load_config({}), client=client)
 
 
-def test_collector_rejects_aws_target_even_with_an_injected_client() -> None:
+def test_collector_accepts_aws_target_with_aws_endpoint_client() -> None:
     config = load_config({"CSPM_TARGET": "aws"})
+    client = SimpleNamespace(
+        meta=SimpleNamespace(endpoint_url="https://sts.us-east-1.amazonaws.com")
+    )
 
-    with pytest.raises(UnsupportedTargetError, match="LocalStack only"):
-        ConcreteCollector(config, client=object())
+    assert ConcreteCollector(config, client=client).client is client
+
+
+def test_collector_rejects_localstack_endpoint_for_aws_target() -> None:
+    config = load_config({"CSPM_TARGET": "aws"})
+    client = SimpleNamespace(meta=SimpleNamespace(endpoint_url="http://localhost:4566"))
+
+    with pytest.raises(ConfigurationError, match="HTTPS AWS service endpoint"):
+        ConcreteCollector(config, client=client)
 
 
 def test_collector_accepts_injected_loopback_boto_client() -> None:

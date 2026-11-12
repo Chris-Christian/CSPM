@@ -3,7 +3,9 @@ from uuid import uuid4
 
 from botocore.exceptions import ClientError
 
+from cspm.collectors import s3 as s3_module
 from cspm.collectors.s3 import S3Collector
+from cspm.config import load_config
 from cspm.models.enums import CollectorStatus
 
 
@@ -207,6 +209,51 @@ def test_s3_empty_continuation_token_fails_incomplete_inventory() -> None:
 
     assert outcome.result.status is CollectorStatus.FAILED
     assert outcome.result.errors[0].operation == "ListBuckets"
+
+
+def test_s3_enrichment_uses_each_bucket_region(
+    monkeypatch,
+) -> None:
+    class RegionalInventory(FakeS3):
+        def get_bucket_location(self, **kwargs):
+            regions = {"east-bucket": "us-east-1", "eu-bucket": "eu-west-1"}
+            return self._call(
+                "get_bucket_location",
+                {"LocationConstraint": regions[kwargs["Bucket"]]},
+                **kwargs,
+            )
+
+    config = load_config({"CSPM_TARGET": "aws", "CSPM_REGION": "us-east-1"})
+    inventory_client = RegionalInventory(
+        [{"Buckets": [{"Name": "east-bucket"}, {"Name": "eu-bucket"}]}]
+    )
+    regional_client = FakeS3()
+    regional_clients = {"eu-west-1": regional_client}
+    factory_calls = []
+
+    def regional_factory(service, received_config, *, region_name):
+        factory_calls.append((service, received_config, region_name))
+        return regional_clients[region_name]
+
+    monkeypatch.setattr(s3_module, "create_client", regional_factory)
+    outcome = S3Collector(config=config, client=inventory_client).collect(uuid4())
+
+    assert factory_calls == [("s3", config, "eu-west-1")]
+    assert inventory_client.calls[0] == ("list_buckets", {"MaxBuckets": 1000})
+    assert [resource.region for resource in outcome.resources] == [
+        "us-east-1",
+        "eu-west-1",
+    ]
+    regional_operations = {name for name, _ in regional_client.calls}
+    assert regional_operations == {
+        "get_bucket_tagging",
+        "get_public_access_block",
+        "get_bucket_policy",
+        "get_bucket_acl",
+        "get_bucket_policy_status",
+    }
+    assert all(kwargs["Bucket"] == "eu-bucket" for _, kwargs in regional_client.calls)
+    assert outcome.result.status is CollectorStatus.SUCCESS
 
 
 def test_s3_inventory_failure_is_failed_and_enrichment_failure_is_partial() -> None:

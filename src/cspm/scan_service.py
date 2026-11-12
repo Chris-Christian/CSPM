@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from cspm.aws.connectivity import verify_connectivity
+from cspm.aws.connectivity import ConnectivityResult, verify_connectivity
 from cspm.collectors import DiscoveryEngine
 from cspm.config import CSPMConfig, load_config
 from cspm.models.collector import CollectorResult
@@ -71,12 +72,17 @@ def _mark_scan_failed_after_interrupt(
 
 
 def run_scan(
-    repository: ScanRepository, config: CSPMConfig | None = None
+    repository: ScanRepository,
+    config: CSPMConfig | None = None,
+    *,
+    on_connected: Callable[[ConnectivityResult], None] | None = None,
 ) -> ScanExecutionResult:
     """Run and persist a complete scan workflow without mutating AWS resources."""
     supplied_settings = config if config is not None else load_config()
     settings = CSPMConfig.model_validate(supplied_settings.model_dump())
-    verify_connectivity(settings)
+    connectivity = verify_connectivity(settings)
+    if on_connected is not None:
+        on_connected(connectivity)
     repository.initialize()
 
     scan_id = uuid4()
