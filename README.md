@@ -1,32 +1,30 @@
-# CSPM - Cloud Security Posture Manager
+# CSPM — Cloud Security Posture Manager
 
-A Python-based Cloud Security Posture Management tool that discovers AWS resources, identifies security misconfigurations, and generates actionable security assessment reports.
+A Python-based CLI tool for discovering cloud resources, identifying security misconfigurations, and generating security assessment reports.
 
-CSPM currently assesses Amazon S3, AWS IAM, and EC2 Security Groups through an extensible rule engine.
+CSPM currently supports **LocalStack** for local testing and **Amazon Web Services (AWS)** for real cloud assessments.
 
 ## Features
 
-- **Cloud Discovery:** Collects configuration and security metadata from S3, IAM, and EC2.
-- **Security Assessment:** Evaluates resources against built-in security rules.
-- **Risk Classification:** Categorizes findings as Critical, High, Medium, or Low.
-- **Evidence-Based Findings:** Provides affected resources, supporting evidence, and remediation guidance.
-- **Scan Persistence:** Stores scan results and findings in SQLite.
-- **Reporting:** Generates JSON, HTML, and Markdown reports.
-- **Coverage Tracking:** Identifies incomplete discovery and assessment results instead of incorrectly treating them as clean assessments.
+- Read-only discovery of S3 buckets, IAM roles and policies, and EC2 security groups.
+- Automated security checks using seven built-in detection rules.
+- Assessment coverage and error tracking.
+- SQLite-based scan history and persistence.
+- JSON, Markdown, and HTML reports.
+- Support for LocalStack and real AWS environments.
+- AWS account identity verification before scanning.
 
 ## Security Rules
 
-| Rule ID | Description                                           | Severity |
-| ------- | ----------------------------------------------------- | -------- |
-| S3-001  | Public bucket policy without bucket-level restriction | High     |
-| S3-002  | Public ACL grants not ignored                         | High     |
-| S3-003  | Incomplete S3 Block Public Access configuration       | Medium   |
-| IAM-001 | Broad IAM permissions and wildcard actions            | High     |
-| IAM-002 | Unconditional wildcard role trust                     | Critical |
-| EC2-001 | Sensitive IPv4 ingress exposed to the internet        | High     |
-| EC2-002 | Sensitive IPv6 ingress exposed to the internet        | High     |
-
-EC2 sensitive ports are configurable through environment variables. TCP defaults include SSH, Telnet, SMB, database, and other commonly sensitive ports.
+| Rule ID | Description | Severity |
+|---|---|---|
+| S3-001 | Public bucket policy without bucket-level RestrictPublicBuckets protection | HIGH |
+| S3-002 | Public ACL grants not ignored by IgnorePublicAcls | HIGH |
+| S3-003 | Incomplete S3 Block Public Access configuration | MEDIUM |
+| IAM-001 | Broad IAM permissions and wildcard actions | HIGH |
+| IAM-002 | Unconditional wildcard principal in IAM trust policy | CRITICAL |
+| EC2-001 | IPv4 internet-wide ingress on sensitive ports | HIGH |
+| EC2-002 | IPv6 internet-wide ingress on sensitive ports | HIGH |
 
 ## Technology Stack
 
@@ -36,118 +34,253 @@ EC2 sensitive ports are configurable through environment variables. TCP defaults
 - Click
 - SQLite
 - Jinja2
-- LocalStack
-- uv
-- Pytest and Ruff
+- Docker and LocalStack
+- pytest and Ruff
 
 ## Prerequisites
 
 - Python 3.13 or later
 - [uv](https://docs.astral.sh/uv/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- LocalStack authentication token, where required by your LocalStack edition
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for LocalStack)
+- AWS CLI (for real AWS assessments)
 
 ## Installation
 
 Clone the repository:
 
-```bash
+```powershell
 git clone https://github.com/Chris-Christian/CSPM.git
 cd CSPM
 ```
 
 Install dependencies:
 
-```bash
+```powershell
 uv sync --locked
 ```
 
-Configure the environment:
+Copy the example environment file:
 
-```shell
-cp .env.example .env
+```powershell
+Copy-Item .env.example .env
 ```
 
-Update `.env` with the required LocalStack authentication token. Keep this file private and never commit it.
+Configure the LocalStack authentication token in `.env` if required by your LocalStack setup.
 
-## Running CSPM
+## Usage
 
-### 1. Start LocalStack
+CSPM supports two targets: LocalStack and AWS. Select the target explicitly before running commands.
 
-```bash
+### 1. LocalStack
+
+Start LocalStack:
+
+```powershell
 docker compose up -d
 ```
 
-LocalStack provides an isolated AWS-compatible environment for testing CSPM.
+Check container health:
 
-### 2. Verify connectivity
+```powershell
+docker compose ps
+```
 
-```bash
+Select LocalStack:
+
+```powershell
+$env:CSPM_TARGET = "localstack"
+```
+
+Check connectivity:
+
+```powershell
 uv run --locked cspm connect
 ```
 
-Checks connectivity with LocalStack through AWS STS.
+Run a scan:
 
-### 3. Run a security scan
-
-```bash
+```powershell
 uv run --locked cspm scan --database .local/cspm.sqlite3
 ```
 
-Discovers resources, evaluates security rules, and persists the results in SQLite.
+### 2. Amazon Web Services
 
-### 4. Generate reports
+CSPM can perform read-only assessments against an actual AWS account.
 
-Replace `<SCAN_ID>` with the UUID returned by the scan command.
+#### Configure AWS credentials
 
-```bash
-uv run --locked cspm report <SCAN_ID> --database .local/cspm.sqlite3 --format all
+Create a dedicated IAM identity with only the permissions required by CSPM. Do not use root account credentials or administrator access.
+
+Configure a named AWS CLI profile:
+
+```powershell
+aws configure --profile cspm-readonly
 ```
 
-Supported formats:
+Provide the access key, secret access key, default region, and output format when prompted.
 
-- `json`
-- `html`
-- `markdown`
-- `all`
+Verify the configured identity:
 
-Reports are generated under:
-
-```text
-reports/
-└── <SCAN_ID>/
-    ├── findings.json
-    ├── report.html
-    └── report.md
+```powershell
+aws sts get-caller-identity --profile cspm-readonly
 ```
 
-Open `report.html` in your browser to view the assessment.
+Confirm that the returned account ID is the intended AWS account.
 
-Existing report files are not overwritten.
+#### Configure CSPM
+
+Set the AWS profile, target, and region:
+
+```powershell
+$env:AWS_PROFILE = "cspm-readonly"
+$env:CSPM_TARGET = "aws"
+$env:CSPM_REGION = "ap-south-1"
+```
+
+Remove any LocalStack endpoint override from the current PowerShell session:
+
+```powershell
+Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
+```
+
+Verify AWS connectivity:
+
+```powershell
+uv run --locked cspm connect
+```
+
+CSPM displays the AWS account ID and region before proceeding.
+
+Run a scan:
+
+```powershell
+uv run --locked cspm scan --database .local/cspm-aws.sqlite3
+```
+
+The configured region determines the EC2 security groups discovered. IAM inventory is account-wide, and S3 bucket inventory spans the account's buckets.
+
+### 3. Generate Reports
+
+Use the scan ID printed after a successful scan:
+
+```powershell
+uv run --locked cspm report SCAN_ID --database .local/cspm-aws.sqlite3 --format all
+```
+
+Replace `SCAN_ID` with the actual scan identifier.
+
+CSPM generates:
+
+- `findings.json`
+- `report.md`
+- `report.html`
+
+Reports contain scan information, discovered resources, findings, severity classifications, evidence, remediation guidance, and assessment coverage.
 
 ## Configuration
 
-| Variable                       | Description                      |
-| ------------------------------ | -------------------------------- |
-| `CSPM_TARGET`                  | Assessment target                |
-| `CSPM_REGION`                  | AWS region                       |
-| `CSPM_LOCALSTACK_ENDPOINT_URL` | LocalStack endpoint              |
-| `CSPM_SENSITIVE_PORTS`         | Configurable TCP sensitive ports |
-| `CSPM_SENSITIVE_UDP_PORTS`     | Configurable UDP sensitive ports |
+The following environment variables control the target and AWS configuration:
 
-See `.env.example` for the available configuration and default values.
+| Variable | Description |
+|---|---|
+| `CSPM_TARGET` | Assessment target: `localstack` or `aws` |
+| `CSPM_REGION` | AWS or LocalStack region |
+| `CSPM_LOCALSTACK_ENDPOINT_URL` | LocalStack endpoint URL; must use a loopback address |
+| `AWS_PROFILE` | Named AWS CLI profile used for AWS authentication |
+
+LocalStack is the default target. AWS must be explicitly selected.
+
+AWS credentials are resolved through Boto3's standard credential provider chain. Do not store AWS credentials in project configuration files.
+
+## Troubleshooting
+
+### AWS variables remain set when running LocalStack tests
+
+PowerShell environment variables persist within the current session. Switch back to LocalStack before running its integration tests:
+
+```powershell
+$env:CSPM_TARGET = "localstack"
+$env:CSPM_REGION = "us-east-1"
+Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
+```
+
+### LocalStack is unavailable
+
+Ensure Docker Desktop is running:
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+Wait until the LocalStack container reports a healthy status.
+
+### S3 IllegalLocationConstraintException during LocalStack integration tests
+
+Use `us-east-1` for the LocalStack integration-test environment:
+
+```powershell
+$env:CSPM_TARGET = "localstack"
+$env:CSPM_REGION = "us-east-1"
+```
+
+This avoids creating test buckets against a regional S3 endpoint without a matching location constraint.
+
+### AWS connectivity or AccessDenied errors
+
+Verify the configured profile:
+
+```powershell
+aws sts get-caller-identity --profile cspm-readonly
+```
+
+Check that the profile is selected and that the IAM identity has the required read permissions.
+
+### Incomplete assessment coverage
+
+Review the assessment errors in the CLI output and generated report. Incomplete coverage must not be interpreted as a clean security assessment.
+
+## Testing
+
+Start Docker Desktop and LocalStack before running the full test suite.
+
+Select the LocalStack target:
+
+```powershell
+$env:CSPM_TARGET = "localstack"
+$env:CSPM_REGION = "us-east-1"
+Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
+```
+
+Run tests:
+
+```powershell
+uv run --locked pytest -q
+```
+
+Run Ruff:
+
+```powershell
+uv run --locked ruff check .
+```
+
+The integration tests use LocalStack and must not be run with the AWS target selected.
 
 ## Security Considerations and Limitations
 
-- The current validated execution target is LocalStack; live AWS scanning is not supported by the current client configuration.
-- Production collectors use read-only cloud operations.
-- The tool does not automatically remediate findings.
-- Account-level S3 Block Public Access settings are not currently collected.
+- Production collectors use read-only AWS API operations.
+- CSPM does not create, modify, or remediate AWS resources during assessments.
+- AWS credentials must be configured outside the project.
+- LocalStack endpoints are restricted to loopback addresses.
+- EC2 security group discovery covers one configured region per scan.
+- Account-level S3 Block Public Access configuration is not currently collected.
 - IAM policy conditions are not fully simulated.
-- Sensitive-port checks are configurable detection rules, not a complete network security assessment.
-- Incomplete collector or assessment coverage must not be interpreted as a clean assessment.
-- Historical drift comparison is not currently implemented.
+- S3 checks evaluate collected bucket-level configuration; they do not constitute a complete effective-access analysis.
+- Assessment results depend on the resources and permissions available to the configured identity.
+- A scan with incomplete coverage must not be considered a clean assessment.
 
 ## License
 
-Distributed under the [MIT License](LICENSE).
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
