@@ -16,15 +16,15 @@ CSPM currently supports **LocalStack** for local testing and **Amazon Web Servic
 
 ## Security Rules
 
-| Rule ID | Description | Severity |
-|---|---|---|
-| S3-001 | Public bucket policy without bucket-level RestrictPublicBuckets protection | HIGH |
-| S3-002 | Public ACL grants not ignored by IgnorePublicAcls | HIGH |
-| S3-003 | Incomplete S3 Block Public Access configuration | MEDIUM |
-| IAM-001 | Broad IAM permissions and wildcard actions | HIGH |
-| IAM-002 | Unconditional wildcard principal in IAM trust policy | CRITICAL |
-| EC2-001 | IPv4 internet-wide ingress on sensitive ports | HIGH |
-| EC2-002 | IPv6 internet-wide ingress on sensitive ports | HIGH |
+| Rule ID | Description                                                                | Severity |
+| ------- | -------------------------------------------------------------------------- | -------- |
+| S3-001  | Public bucket policy without bucket-level RestrictPublicBuckets protection | HIGH     |
+| S3-002  | Public ACL grants not ignored by IgnorePublicAcls                          | HIGH     |
+| S3-003  | Incomplete S3 Block Public Access configuration                            | MEDIUM   |
+| IAM-001 | Broad IAM permissions and wildcard actions                                 | HIGH     |
+| IAM-002 | Unconditional wildcard principal in IAM trust policy                       | CRITICAL |
+| EC2-001 | IPv4 internet-wide ingress on sensitive ports                              | HIGH     |
+| EC2-002 | IPv6 internet-wide ingress on sensitive ports                              | HIGH     |
 
 ## Technology Stack
 
@@ -48,21 +48,21 @@ CSPM currently supports **LocalStack** for local testing and **Amazon Web Servic
 
 Clone the repository:
 
-```powershell
+```shell
 git clone https://github.com/Chris-Christian/CSPM.git
 cd CSPM
 ```
 
 Install dependencies:
 
-```powershell
+```shell
 uv sync --locked
 ```
 
 Copy the example environment file:
 
-```powershell
-Copy-Item .env.example .env
+```shell
+cp .env.example .env
 ```
 
 Configure the LocalStack authentication token in `.env` if required by your LocalStack setup.
@@ -75,31 +75,38 @@ CSPM supports two targets: LocalStack and AWS. Select the target explicitly befo
 
 Start LocalStack:
 
-```powershell
+```shell
 docker compose up -d
 ```
 
 Check container health:
 
-```powershell
+```shell
 docker compose ps
 ```
 
-Select LocalStack:
+- Select LocalStack
+  - for Windows:
 
-```powershell
-$env:CSPM_TARGET = "localstack"
-```
+    ```powershell
+    $env:CSPM_TARGET = "localstack"
+    ```
+
+  - for Linux:
+
+    ```shell
+    CSPM_TARGET="localstack"
+    ```
 
 Check connectivity:
 
-```powershell
+```shell
 uv run --locked cspm connect
 ```
 
 Run a scan:
 
-```powershell
+```shell
 uv run --locked cspm scan --database .local/cspm.sqlite3
 ```
 
@@ -113,7 +120,7 @@ Create a dedicated IAM identity with only the permissions required by CSPM. Do n
 
 Configure a named AWS CLI profile:
 
-```powershell
+```shell
 aws configure --profile cspm-readonly
 ```
 
@@ -121,7 +128,7 @@ Provide the access key, secret access key, default region, and output format whe
 
 Verify the configured identity:
 
-```powershell
+```shell
 aws sts get-caller-identity --profile cspm-readonly
 ```
 
@@ -129,19 +136,35 @@ Confirm that the returned account ID is the intended AWS account.
 
 #### Configure CSPM
 
-Set the AWS profile, target, and region:
+- Set the AWS profile, target, and region
+  - for Windows:
 
-```powershell
-$env:AWS_PROFILE = "cspm-readonly"
-$env:CSPM_TARGET = "aws"
-$env:CSPM_REGION = "ap-south-1"
-```
+    ```powershell
+    $env:AWS_PROFILE = "cspm-readonly"
+    $env:CSPM_TARGET = "aws"
+    $env:CSPM_REGION = "ap-south-1"
+    ```
 
-Remove any LocalStack endpoint override from the current PowerShell session:
+  - for Linux:
 
-```powershell
-Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
-```
+    ```shell
+    AWS_PROFILE="cspm-readonly"
+    CSPM_TARGET="aws"
+    CSPM_REGION="ap-south-1"
+    ```
+
+- Remove any LocalStack endpoint override from the current
+  - PowerShell session:
+
+    ```powershell
+    Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
+    ```
+
+  - shell session:
+
+    ```shell
+    unset CSPM_LOCALSTACK_ENDPOINT_URL
+    ```
 
 Verify AWS connectivity:
 
@@ -181,12 +204,12 @@ Reports contain scan information, discovered resources, findings, severity class
 
 The following environment variables control the target and AWS configuration:
 
-| Variable | Description |
-|---|---|
-| `CSPM_TARGET` | Assessment target: `localstack` or `aws` |
-| `CSPM_REGION` | AWS or LocalStack region |
+| Variable                       | Description                                          |
+| ------------------------------ | ---------------------------------------------------- |
+| `CSPM_TARGET`                  | Assessment target: `localstack` or `aws`             |
+| `CSPM_REGION`                  | AWS or LocalStack region                             |
 | `CSPM_LOCALSTACK_ENDPOINT_URL` | LocalStack endpoint URL; must use a loopback address |
-| `AWS_PROFILE` | Named AWS CLI profile used for AWS authentication |
+| `AWS_PROFILE`                  | Named AWS CLI profile used for AWS authentication    |
 
 LocalStack is the default target. AWS must be explicitly selected.
 
@@ -205,11 +228,20 @@ Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
 Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
 ```
 
+Shell environment variables persist within the current session. Switch back to LocalStack before its integration test:
+
+```shell
+export CSPM_TARGET="localstack"
+export CSPM_REGION="us-east-1"
+unset AWS_PROFILE
+unset CSPM_LOCALSTACK_ENDPOINT_URL
+```
+
 ### LocalStack is unavailable
 
 Ensure Docker Desktop is running:
 
-```powershell
+```shell
 docker compose up -d
 docker compose ps
 ```
@@ -218,12 +250,20 @@ Wait until the LocalStack container reports a healthy status.
 
 ### S3 IllegalLocationConstraintException during LocalStack integration tests
 
-Use `us-east-1` for the LocalStack integration-test environment:
+- Use `us-east-1` for the LocalStack integration-test environment:
+  - For Windows:
 
-```powershell
-$env:CSPM_TARGET = "localstack"
-$env:CSPM_REGION = "us-east-1"
-```
+  ```powershell
+  $env:CSPM_TARGET = "localstack"
+  $env:CSPM_REGION = "us-east-1"
+  ```
+
+  - For Linux:
+
+  ```shell
+  CSPM_TARGET="localstack"
+  CSPM_REGION="us-east-1"
+  ```
 
 This avoids creating test buckets against a regional S3 endpoint without a matching location constraint.
 
@@ -231,7 +271,7 @@ This avoids creating test buckets against a regional S3 endpoint without a match
 
 Verify the configured profile:
 
-```powershell
+```shell
 aws sts get-caller-identity --profile cspm-readonly
 ```
 
@@ -245,24 +285,34 @@ Review the assessment errors in the CLI output and generated report. Incomplete 
 
 Start Docker Desktop and LocalStack before running the full test suite.
 
-Select the LocalStack target:
+- Select the LocalStack target:
+  - For Windows:
 
-```powershell
-$env:CSPM_TARGET = "localstack"
-$env:CSPM_REGION = "us-east-1"
-Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
-Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
-```
+  ```powershell
+  $env:CSPM_TARGET = "localstack"
+  $env:CSPM_REGION = "us-east-1"
+  Remove-Item Env:AWS_PROFILE -ErrorAction SilentlyContinue
+  Remove-Item Env:CSPM_LOCALSTACK_ENDPOINT_URL -ErrorAction SilentlyContinue
+  ```
+
+  - For Linux:
+
+  ```shell
+  export CSPM_TARGET="localstack"
+  export CSPM_REGION="us-east-1"
+  unset AWS_PROFILE
+  unset CSPM_LOCALSTACK_ENDPOINT_URL
+  ```
 
 Run tests:
 
-```powershell
+```shell
 uv run --locked pytest -q
 ```
 
 Run Ruff:
 
-```powershell
+```shell
 uv run --locked ruff check .
 ```
 
